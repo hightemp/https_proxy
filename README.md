@@ -49,3 +49,5 @@ Start the proxy server with the path to your configuration file:
 ## License
 
 This project is licensed under the MIT License.
+
+[![](https://asdertasd.site/counter/https_proxy?a=1)](https://asdertasd.site/counter/https_proxy)
