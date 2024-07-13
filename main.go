@@ -3,23 +3,44 @@ package main
 import (
 	"crypto/tls"
 	"encoding/base64"
+	"flag"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
-const (
-	proxyAddr = ":9999"
-	username  = "user"
-	password  = "pass"
-)
+type Config struct {
+	ProxyAddr string `yaml:"proxy_addr"`
+	Username  string `yaml:"username"`
+	Password  string `yaml:"password"`
+	CertPath  string `yaml:"cert_path"`
+	KeyPath   string `yaml:"key_path"`
+}
+
+var config Config
 
 func main() {
+	configPath := flag.String("config", "config.yaml", "Path to the config file")
+	flag.Parse()
+
+	content, err := os.ReadFile(*configPath)
+	if err != nil {
+		log.Fatalf("Error reading config file: %v", err)
+	}
+
+	err = yaml.Unmarshal(content, &config)
+	if err != nil {
+		log.Fatalf("Error parsing config file: %v", err)
+	}
+
 	server := &http.Server{
-		Addr: proxyAddr,
+		Addr: config.ProxyAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !basicAuth(w, r) {
 				return
@@ -31,8 +52,8 @@ func main() {
 		},
 	}
 
-	log.Printf("Starting proxy server on %s\n", proxyAddr)
-	log.Fatal(server.ListenAndServeTLS("./cert.pem", "./key.pem"))
+	log.Printf("Starting proxy server on %s\n", config.ProxyAddr)
+	log.Fatal(server.ListenAndServeTLS(config.CertPath, config.KeyPath))
 }
 
 func basicAuth(w http.ResponseWriter, r *http.Request) bool {
@@ -51,7 +72,7 @@ func basicAuth(w http.ResponseWriter, r *http.Request) bool {
 	}
 
 	pair := strings.SplitN(string(payload), ":", 2)
-	if len(pair) != 2 || pair[0] != username || pair[1] != password {
+	if len(pair) != 2 || pair[0] != config.Username || pair[1] != config.Password {
 		w.Header().Set("Proxy-Authenticate", `Basic realm="Proxy Authorization Required"`)
 		w.WriteHeader(http.StatusProxyAuthRequired)
 		return false
