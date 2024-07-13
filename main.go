@@ -42,6 +42,7 @@ func main() {
 	server := &http.Server{
 		Addr: config.ProxyAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Println("Received request:", r.Method, r.URL)
 			if !basicAuth(w, r) {
 				return
 			}
@@ -59,6 +60,7 @@ func main() {
 func basicAuth(w http.ResponseWriter, r *http.Request) bool {
 	auth := r.Header.Get("Proxy-Authorization")
 	if auth == "" {
+		log.Println("No Proxy-Authorization header")
 		w.Header().Set("Proxy-Authenticate", `Basic realm="Proxy Authorization Required"`)
 		w.WriteHeader(http.StatusProxyAuthRequired)
 		return false
@@ -72,7 +74,15 @@ func basicAuth(w http.ResponseWriter, r *http.Request) bool {
 	}
 
 	pair := strings.SplitN(string(payload), ":", 2)
-	if len(pair) != 2 || pair[0] != config.Username || pair[1] != config.Password {
+	if len(pair) != 2 {
+		log.Println("Invalid auth format")
+		w.Header().Set("Proxy-Authenticate", `Basic realm="Proxy Authorization Required"`)
+		w.WriteHeader(http.StatusProxyAuthRequired)
+		return false
+	}
+
+	if pair[0] != config.Username || pair[1] != config.Password {
+		log.Printf("Invalid credentials: %s:%s\n", pair[0], pair[1])
 		w.Header().Set("Proxy-Authenticate", `Basic realm="Proxy Authorization Required"`)
 		w.WriteHeader(http.StatusProxyAuthRequired)
 		return false
@@ -112,5 +122,10 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 func transfer(destination io.WriteCloser, source io.ReadCloser) {
 	defer destination.Close()
 	defer source.Close()
-	io.Copy(destination, source)
+	bytes, err := io.Copy(destination, source)
+	if err != nil {
+		log.Printf("Transfer error: %v\n", err)
+	} else {
+		log.Printf("Transferred %d bytes\n", bytes)
+	}
 }
