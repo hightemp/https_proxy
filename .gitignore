@@ -1,3 +1,5 @@
 https_proxy
 config.yaml
 test.sh
+cert.pem
+key.pem
