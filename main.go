@@ -19,6 +19,7 @@ type Config struct {
 	ProxyAddr string `yaml:"proxy_addr"`
 	Username  string `yaml:"username"`
 	Password  string `yaml:"password"`
+	Proto     string `yaml:"proto"`
 	CertPath  string `yaml:"cert_path"`
 	KeyPath   string `yaml:"key_path"`
 }
@@ -54,7 +55,11 @@ func main() {
 	}
 
 	log.Printf("Starting proxy server on %s\n", config.ProxyAddr)
-	log.Fatal(server.ListenAndServeTLS(config.CertPath, config.KeyPath))
+	if config.Proto == "https" {
+		log.Fatal(server.ListenAndServeTLS(config.CertPath, config.KeyPath))
+	} else {
+		log.Fatal(server.ListenAndServe())
+	}
 }
 
 func basicAuth(w http.ResponseWriter, r *http.Request) bool {
