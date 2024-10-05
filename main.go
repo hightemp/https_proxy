@@ -80,7 +80,7 @@ func basicAuth(w http.ResponseWriter, r *http.Request) bool {
 
 	pair := strings.SplitN(string(payload), ":", 2)
 	if len(pair) != 2 {
-		log.Println("Invalid auth format")
+		log.Printf("Invalid auth format: %v\n", pair)
 		w.Header().Set("Proxy-Authenticate", `Basic realm="Proxy Authorization Required"`)
 		w.WriteHeader(http.StatusProxyAuthRequired)
 		return false
@@ -98,12 +98,14 @@ func basicAuth(w http.ResponseWriter, r *http.Request) bool {
 
 func handleTunneling(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodConnect {
+		log.Printf("Error: Method not allowed: %s\n", r.Method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	destConn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
 	if err != nil {
+		log.Printf("Error: Can't connect to host: %s, %v\n", r.Host, err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -111,11 +113,13 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
+		log.Printf("Error: Hijacking not supported\n")
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
+		log.Printf("Error: Client connection error: %v\n", err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
