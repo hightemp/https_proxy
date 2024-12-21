@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -47,7 +48,12 @@ func main() {
 			if !basicAuth(w, r) {
 				return
 			}
-			handleTunneling(w, r)
+
+			if r.Method == http.MethodConnect {
+				handleTunneling(w, r)
+			} else {
+				handleHTTP(w, r)
+			}
 		}),
 		TLSConfig: &tls.Config{
 			// Certificates: []tls.Certificate{cert},
@@ -94,6 +100,49 @@ func basicAuth(w http.ResponseWriter, r *http.Request) bool {
 	}
 
 	return true
+}
+
+func handleHTTP(w http.ResponseWriter, r *http.Request) {
+	r.RequestURI = ""
+	r.Header.Del("Proxy-Connection")
+	r.Header.Del("Proxy-Authorization")
+
+	r.Host = r.URL.Host
+
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				lastURL := via[len(via)-1].URL.String()
+				err := fmt.Errorf("too many redirects (>%d) while following %s", len(via), lastURL)
+				return err
+			}
+			return nil
+		},
+	}
+
+	resp, err := client.Do(r)
+	if err != nil {
+		log.Printf("Error forwarding request: %v\n", err)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer resp.Body.Close()
+
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	w.WriteHeader(resp.StatusCode)
+
+	written, err := io.Copy(w, resp.Body)
+	if err != nil {
+		log.Printf("Error copying response body after %d bytes: %v\n", written, err)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	log.Printf("Successfully copied %d bytes from response\n", written)
 }
 
 func handleTunneling(w http.ResponseWriter, r *http.Request) {
