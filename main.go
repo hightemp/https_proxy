@@ -55,14 +55,29 @@ func main() {
 				handleHTTP(w, r)
 			}
 		}),
-		TLSConfig: &tls.Config{
-			// Certificates: []tls.Certificate{cert},
-		},
 	}
 
 	log.Printf("Starting proxy server on %s\n", config.ProxyAddr)
 	if config.Proto == "https" {
-		log.Fatal(server.ListenAndServeTLS(config.CertPath, config.KeyPath))
+		ln, err := net.Listen("tcp", config.ProxyAddr)
+		if err != nil {
+			log.Fatalf("Error creating listener: %v", err)
+		}
+
+		cert, err := tls.LoadX509KeyPair(config.CertPath, config.KeyPath)
+		if err != nil {
+			log.Fatalf("Error loading certificate: %v", err)
+		}
+
+		server.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+
+		tlsListener := tls.NewListener(ln, server.TLSConfig)
+
+		log.Fatal(server.Serve(tlsListener))
+
+		// log.Fatal(server.ListenAndServeTLS(config.CertPath, config.KeyPath))
 	} else {
 		log.Fatal(server.ListenAndServe())
 	}
