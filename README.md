@@ -1,6 +1,6 @@
 # Secure HTTP Proxy Server
 
-This is a simple implementation of a secure HTTP proxy server in Go.
+This is a simple implementation of a secure HTTP proxy server(can HTTPS and HTTP) in Go.
 
 ## Features
 
@@ -34,12 +34,26 @@ This is a simple implementation of a secure HTTP proxy server in Go.
     key_path: "path/to/your/key.pem"
     ```
 
+4. Create certificates.
+
+    ```bash
+    sudo certbot certonly --standalone -d example.com   
+    ```
+
+    Add certs to config:
+
+    ```yaml
+    cert_path: "/etc/letsencrypt/live/example.com/fullchain.pem"
+    key_path: "/etc/letsencrypt/live/example.com/privkey.pem"
+    ```
+
+
 ## Usage
 
 Start the proxy server with the path to your configuration file:
 
 ```sh
-./proxy-server -config config.yaml
+./https_proxy -config config.yaml
 ```
 
 ## License
