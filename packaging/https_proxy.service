@@ -1,0 +1,10 @@
+[Unit]
+Description=HTTPS proxy
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/https_proxy --config /etc/https_proxy/config.yaml
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
