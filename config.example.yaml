@@ -1,5 +1,6 @@
 proxy_addr: 0.0.0.0:9999
 username: user
 password: pass
+proto: http
 cert_path: ./cert.pem
 key_path: ./key.pem
