@@ -1,4 +1,4 @@
-module https_proxy
+module github.com/hightemp/https_proxy
 
 go 1.22.5
 
