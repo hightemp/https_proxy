@@ -22,6 +22,7 @@ clean:
 
 install: build
 	@echo "Installing $(PROJECT_NAME)..."
+	systemctl stop $(PROJECT_NAME)
 	install -d $(CONFIG_DIR)
 	install -m 755 $(PROJECT_NAME) $(INSTALL_DIR)/$(PROJECT_NAME)
 	@if [ ! -f $(CONFIG_DIR)/config.yaml ]; then \
