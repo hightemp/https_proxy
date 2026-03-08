@@ -22,7 +22,6 @@ clean:
 
 install: build
 	@echo "Installing $(PROJECT_NAME)..."
-	systemctl stop $(PROJECT_NAME)
 	install -d $(CONFIG_DIR)
 	install -m 755 $(PROJECT_NAME) $(INSTALL_DIR)/$(PROJECT_NAME)
 	@if [ ! -f $(CONFIG_DIR)/config.yaml ]; then \
@@ -34,7 +33,7 @@ install: build
 	install -m 644 packaging/$(PROJECT_NAME).service $(SYSTEMD_DIR)/$(PROJECT_NAME).service
 	systemctl daemon-reload
 	systemctl enable $(PROJECT_NAME)
-	systemctl start $(PROJECT_NAME)
+	systemctl restart $(PROJECT_NAME)
 	@echo "Installation complete. Service $(PROJECT_NAME) is running and enabled on boot."
 
 uninstall:
