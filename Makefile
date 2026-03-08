@@ -21,69 +21,69 @@ clean:
 	rm -f $(PROJECT_NAME)_static
 
 install: build
-	@echo "Установка $(PROJECT_NAME)..."
+	@echo "Installing $(PROJECT_NAME)..."
 	install -d $(CONFIG_DIR)
 	install -m 755 $(PROJECT_NAME) $(INSTALL_DIR)/$(PROJECT_NAME)
 	@if [ ! -f $(CONFIG_DIR)/config.yaml ]; then \
 		install -m 644 config.example.yaml $(CONFIG_DIR)/config.yaml; \
-		echo "Конфиг установлен: $(CONFIG_DIR)/config.yaml"; \
+		echo "Config installed: $(CONFIG_DIR)/config.yaml"; \
 	else \
-		echo "Конфиг уже существует, пропускаем: $(CONFIG_DIR)/config.yaml"; \
+		echo "Config already exists, skipping: $(CONFIG_DIR)/config.yaml"; \
 	fi
 	install -m 644 packaging/$(PROJECT_NAME).service $(SYSTEMD_DIR)/$(PROJECT_NAME).service
 	systemctl daemon-reload
 	systemctl enable $(PROJECT_NAME)
 	systemctl start $(PROJECT_NAME)
-	@echo "Установка завершена. Сервис $(PROJECT_NAME) запущен и добавлен в автозагрузку."
+	@echo "Installation complete. Service $(PROJECT_NAME) is running and enabled on boot."
 
 uninstall:
-	@echo "Удаление $(PROJECT_NAME)..."
+	@echo "Removing $(PROJECT_NAME)..."
 	-systemctl stop $(PROJECT_NAME) 2>/dev/null || true
 	-systemctl disable $(PROJECT_NAME) 2>/dev/null || true
 	rm -f $(SYSTEMD_DIR)/$(PROJECT_NAME).service
 	rm -f $(INSTALL_DIR)/$(PROJECT_NAME)
 	systemctl daemon-reload
-	@echo "Удаление завершено."
-	@echo "Конфигурация сохранена в $(CONFIG_DIR)"
+	@echo "Removal complete."
+	@echo "Configuration preserved in $(CONFIG_DIR)"
 
 uninstall-full: uninstall
-	@echo "Удаление конфигурации..."
+	@echo "Removing configuration..."
 	rm -rf $(CONFIG_DIR)
-	@echo "Полное удаление завершено."
+	@echo "Full removal complete."
 
 install-service:
 	install -m 644 packaging/$(PROJECT_NAME).service $(SYSTEMD_DIR)/$(PROJECT_NAME).service
 	systemctl daemon-reload
 	systemctl enable $(PROJECT_NAME)
 	systemctl start $(PROJECT_NAME)
-	@echo "Сервис $(PROJECT_NAME) установлен и запущен."
+	@echo "Service $(PROJECT_NAME) installed and started."
 
 uninstall-service:
 	-systemctl stop $(PROJECT_NAME) 2>/dev/null || true
 	-systemctl disable $(PROJECT_NAME) 2>/dev/null || true
 	rm -f $(SYSTEMD_DIR)/$(PROJECT_NAME).service
 	systemctl daemon-reload
-	@echo "Сервис $(PROJECT_NAME) удалён."
+	@echo "Service $(PROJECT_NAME) removed."
 
 start:
 	systemctl start $(PROJECT_NAME)
-	@echo "Сервис $(PROJECT_NAME) запущен."
+	@echo "Service $(PROJECT_NAME) started."
 
 stop:
 	systemctl stop $(PROJECT_NAME)
-	@echo "Сервис $(PROJECT_NAME) остановлен."
+	@echo "Service $(PROJECT_NAME) stopped."
 
 restart:
 	systemctl restart $(PROJECT_NAME)
-	@echo "Сервис $(PROJECT_NAME) перезапущен."
+	@echo "Service $(PROJECT_NAME) restarted."
 
 status:
 	systemctl status $(PROJECT_NAME)
 
 enable:
 	systemctl enable $(PROJECT_NAME)
-	@echo "Сервис $(PROJECT_NAME) добавлен в автозагрузку."
+	@echo "Service $(PROJECT_NAME) enabled on boot."
 
 disable:
 	systemctl disable $(PROJECT_NAME)
-	@echo "Сервис $(PROJECT_NAME) удалён из автозагрузки."
+	@echo "Service $(PROJECT_NAME) disabled from boot."
