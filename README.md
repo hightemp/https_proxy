@@ -1,14 +1,27 @@
 # Secure HTTP Proxy Server
 
-This is a simple implementation of a secure HTTP proxy server(can HTTPS and HTTP) in Go.
+A secure HTTP/HTTPS proxy server in Go with Basic authentication, TLS support, and upstream proxy chaining.
 
 ## Features
 
-- Secure TLS connection
+- HTTP and HTTPS proxy modes
 - Basic authentication
-- Configurable via a YAML file
+- TLS with configurable certificates
+- Upstream proxy chaining (proxy chain support)
+  - Supports HTTP and HTTPS upstream proxies
+  - Configurable via `config.yaml` or environment variables (`HTTPS_PROXY`, `HTTP_PROXY`)
+  - Basic authentication to upstream proxy
+- Configurable via YAML file
+- Systemd service support
+- Graceful shutdown
 
 ## Installation
+
+### From release
+
+Download the latest binary from the [Releases](https://github.com/hightemp/https_proxy/releases) page.
+
+### Build from source
 
 1. Clone the repository:
 
@@ -20,41 +33,108 @@ This is a simple implementation of a secure HTTP proxy server(can HTTPS and HTTP
 2. Build the project:
 
     ```sh
-    go build -o https_proxy main.go
+    make build
     ```
 
-3. Create a `config.yaml` file with the following content:
+## Configuration
 
-    ```yaml
-    proxy_addr: 0.0.0.0:8080
-    username: "your_username"
-    password: "your_password"
-    proto: https
-    cert_path: "path/to/your/cert.pem"
-    key_path: "path/to/your/key.pem"
-    ```
+Create a `config.yaml` file (see `config.example.yaml`):
 
-4. Create certificates.
+```yaml
+proxy_addr: 0.0.0.0:8080
+username: "your_username"
+password: "your_password"
+proto: https
+cert_path: "path/to/your/cert.pem"
+key_path: "path/to/your/key.pem"
+# upstream_proxy: http://user:pass@upstream-proxy:8080
+```
 
-    ```bash
-    sudo certbot certonly --standalone -d example.com   
-    ```
+| Parameter | Description |
+|---|---|
+| `proxy_addr` | Listen address and port |
+| `username` | Basic auth username |
+| `password` | Basic auth password |
+| `proto` | `http` or `https` |
+| `cert_path` | Path to TLS certificate (for `https` mode) |
+| `key_path` | Path to TLS private key (for `https` mode) |
+| `upstream_proxy` | Upstream proxy URL for chaining (optional) |
 
-    Add certs to config:
+### Upstream Proxy (Proxy Chain)
 
-    ```yaml
-    cert_path: "/etc/letsencrypt/live/example.com/fullchain.pem"
-    key_path: "/etc/letsencrypt/live/example.com/privkey.pem"
-    ```
+To route all traffic through an upstream proxy, set `upstream_proxy` in `config.yaml`:
 
+```yaml
+upstream_proxy: http://user:pass@upstream-proxy:8080
+```
+
+HTTPS upstream proxies are also supported:
+
+```yaml
+upstream_proxy: https://user:pass@upstream-proxy:8443
+```
+
+If `upstream_proxy` is not set in the config, the proxy falls back to standard environment variables (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`).
+
+### TLS Certificates
+
+Generate self-signed certificates:
+
+```bash
+bash generate_certs.sh
+```
+
+Or use Let's Encrypt:
+
+```bash
+sudo certbot certonly --standalone -d example.com
+```
+
+```yaml
+cert_path: "/etc/letsencrypt/live/example.com/fullchain.pem"
+key_path: "/etc/letsencrypt/live/example.com/privkey.pem"
+```
 
 ## Usage
-
-Start the proxy server with the path to your configuration file:
 
 ```sh
 ./https_proxy -config config.yaml
 ```
+
+### Systemd Service
+
+```sh
+sudo make install
+```
+
+Manage the service:
+
+```sh
+make start / stop / restart / status
+```
+
+## Makefile Commands
+
+| Command | Description |
+|---|---|
+| `make build` | Build the binary |
+| `make build-static` | Build a static binary (linux/amd64) |
+| `make run` | Run the proxy |
+| `make install` | Install binary, config and systemd service |
+| `make uninstall` | Remove binary and service (keep config) |
+| `make uninstall-full` | Remove everything including config |
+| `make release` | Tag version from `VERSION` file and push |
+
+## Release
+
+1. Update the version in the `VERSION` file.
+2. Run:
+
+    ```sh
+    make release
+    ```
+
+   This will commit, create a git tag `vX.Y.Z`, and push it. GitHub Actions will automatically build binaries and create a release.
 
 ## License
 

@@ -1,9 +1,10 @@
 PROJECT_NAME = https_proxy
+VERSION = $(shell cat VERSION | tr -d '[:space:]')
 INSTALL_DIR = /usr/bin
 CONFIG_DIR = /etc/$(PROJECT_NAME)
 SYSTEMD_DIR = /etc/systemd/system
 
-.PHONY: build run clean install uninstall install-service uninstall-service start stop restart status enable disable
+.PHONY: build run clean install uninstall install-service uninstall-service start stop restart status enable disable release
 
 build:
 	CGO_ENABLED=0 go build -o $(PROJECT_NAME) main.go
@@ -87,3 +88,13 @@ enable:
 disable:
 	systemctl disable $(PROJECT_NAME)
 	@echo "Service $(PROJECT_NAME) disabled from boot."
+
+release:
+	@test -n "$(VERSION)" || (echo "VERSION file is empty"; exit 1)
+	@echo "Releasing v$(VERSION)..."
+	git add -A
+	git commit -m "release v$(VERSION)" || true
+	git tag -f "v$(VERSION)"
+	git push
+	git push -f --tags
+	@echo "Released v$(VERSION)"
