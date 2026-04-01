@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -57,6 +58,15 @@ var (
 	config     Config
 	httpClient *http.Client
 )
+
+type bufferedConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (c *bufferedConn) Read(p []byte) (int, error) {
+	return c.reader.Read(p)
+}
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "Path to the config file")
@@ -277,6 +287,35 @@ func getProxyFunc() func(*http.Request) (*url.URL, error) {
 	return http.ProxyFromEnvironment
 }
 
+func readConnectResponse(br *bufio.Reader) (int, error) {
+	statusLine, err := br.ReadString('\n')
+	if err != nil {
+		return 0, fmt.Errorf("read status line from upstream: %w", err)
+	}
+
+	parts := strings.SplitN(strings.TrimSpace(statusLine), " ", 3)
+	if len(parts) < 2 || !strings.HasPrefix(parts[0], "HTTP/") {
+		return 0, fmt.Errorf("invalid CONNECT response from upstream: %q", strings.TrimSpace(statusLine))
+	}
+
+	statusCode, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, fmt.Errorf("parse upstream status code: %w", err)
+	}
+
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			return 0, fmt.Errorf("read header from upstream: %w", err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+
+	return statusCode, nil
+}
+
 // dialUpstream connects to the target host, either directly or via upstream proxy.
 // When an upstream proxy is configured, it sends a CONNECT request to establish the tunnel.
 func dialUpstream(targetHost string) (net.Conn, error) {
@@ -328,21 +367,22 @@ func dialUpstream(targetHost string) (net.Conn, error) {
 		return nil, fmt.Errorf("send CONNECT to upstream: %w", err)
 	}
 
-	// Read upstream proxy response.
+	// Read just the status line and headers. Some upstream proxies send
+	// Transfer-Encoding on CONNECT 200, and http.ReadResponse().Body.Close()
+	// can block forever waiting for a body that does not exist.
 	br := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(br, nil)
+	statusCode, err := readConnectResponse(br)
 	if err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("read CONNECT response from upstream: %w", err)
+		return nil, err
 	}
-	resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if statusCode != http.StatusOK {
 		conn.Close()
-		return nil, fmt.Errorf("upstream proxy CONNECT returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("upstream proxy CONNECT returned %d", statusCode)
 	}
 
-	return conn, nil
+	return &bufferedConn{Conn: conn, reader: br}, nil
 }
 
 func handleTunneling(w http.ResponseWriter, r *http.Request) {
@@ -377,16 +417,16 @@ func handleTunneling(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		transfer(destConn, clientConn)
 		// Signal the other direction to stop by setting a read deadline.
-		if tc, ok := destConn.(*net.TCPConn); ok {
-			tc.SetReadDeadline(time.Now())
+		if dc, ok := destConn.(interface{ SetReadDeadline(time.Time) error }); ok {
+			_ = dc.SetReadDeadline(time.Now())
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
 		transfer(clientConn, destConn)
-		if tc, ok := clientConn.(*net.TCPConn); ok {
-			tc.SetReadDeadline(time.Now())
+		if dc, ok := clientConn.(interface{ SetReadDeadline(time.Time) error }); ok {
+			_ = dc.SetReadDeadline(time.Now())
 		}
 	}()
 
