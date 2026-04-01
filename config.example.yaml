@@ -4,3 +4,4 @@ password: pass
 proto: http
 cert_path: ./cert.pem
 key_path: ./key.pem
+# upstream_proxy: https://user:pass@upstream-proxy:8080

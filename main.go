@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
@@ -11,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -22,12 +24,13 @@ import (
 )
 
 type Config struct {
-	ProxyAddr string `yaml:"proxy_addr"`
-	Username  string `yaml:"username"`
-	Password  string `yaml:"password"`
-	Proto     string `yaml:"proto"`
-	CertPath  string `yaml:"cert_path"`
-	KeyPath   string `yaml:"key_path"`
+	ProxyAddr     string `yaml:"proxy_addr"`
+	Username      string `yaml:"username"`
+	Password      string `yaml:"password"`
+	Proto         string `yaml:"proto"`
+	CertPath      string `yaml:"cert_path"`
+	KeyPath       string `yaml:"key_path"`
+	UpstreamProxy string `yaml:"upstream_proxy"`
 }
 
 // Hop-by-hop headers that should not be forwarded by proxies (RFC 2616 §13.5.1).
@@ -74,6 +77,7 @@ func main() {
 	// Global HTTP client with connection pooling and timeouts.
 	httpClient = &http.Client{
 		Transport: &http.Transport{
+			Proxy:               getProxyFunc(),
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 10,
 			IdleConnTimeout:     90 * time.Second,
@@ -124,6 +128,10 @@ func main() {
 			slog.Error("Server shutdown error", "error", err)
 		}
 	}()
+
+	if u := getUpstreamProxyURL(); u != nil {
+		slog.Info("Upstream proxy configured", "upstream", u.Redacted())
+	}
 
 	slog.Info("Starting proxy server", "addr", config.ProxyAddr, "proto", config.Proto)
 	if config.Proto == "https" {
@@ -234,8 +242,111 @@ func handleHTTP(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("Response copied", "bytes", written, "url", r.URL.String())
 }
 
+// getUpstreamProxyURL returns the upstream proxy URL from config or environment.
+// Config value takes precedence over environment variables.
+func getUpstreamProxyURL() *url.URL {
+	if config.UpstreamProxy != "" {
+		u, err := url.Parse(config.UpstreamProxy)
+		if err != nil {
+			slog.Error("Invalid upstream_proxy URL in config", "error", err)
+			return nil
+		}
+		return u
+	}
+	// Fall back to environment variables (HTTPS_PROXY, HTTP_PROXY, etc.)
+	dummyReq := &http.Request{URL: &url.URL{Scheme: "https", Host: "example.com"}}
+	u, err := http.ProxyFromEnvironment(dummyReq)
+	if err != nil {
+		return nil
+	}
+	return u
+}
+
+// getProxyFunc returns a proxy function for http.Transport.
+// If upstream_proxy is set in config, it always uses that.
+// Otherwise falls back to http.ProxyFromEnvironment.
+func getProxyFunc() func(*http.Request) (*url.URL, error) {
+	if config.UpstreamProxy != "" {
+		proxyURL, err := url.Parse(config.UpstreamProxy)
+		if err != nil {
+			slog.Error("Invalid upstream_proxy URL in config", "error", err)
+			return nil
+		}
+		return http.ProxyURL(proxyURL)
+	}
+	return http.ProxyFromEnvironment
+}
+
+// dialUpstream connects to the target host, either directly or via upstream proxy.
+// When an upstream proxy is configured, it sends a CONNECT request to establish the tunnel.
+func dialUpstream(targetHost string) (net.Conn, error) {
+	upstreamURL := getUpstreamProxyURL()
+	if upstreamURL == nil {
+		// Direct connection.
+		return net.DialTimeout("tcp", targetHost, 10*time.Second)
+	}
+
+	slog.Debug("Connecting via upstream proxy", "upstream", upstreamURL.Redacted(), "target", targetHost)
+
+	// Connect to the upstream proxy.
+	rawConn, err := net.DialTimeout("tcp", upstreamURL.Host, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("dial upstream proxy %s: %w", upstreamURL.Redacted(), err)
+	}
+
+	// If the upstream proxy is HTTPS, wrap with TLS.
+	var conn net.Conn = rawConn
+	if upstreamURL.Scheme == "https" {
+		host, _, err := net.SplitHostPort(upstreamURL.Host)
+		if err != nil {
+			host = upstreamURL.Host
+		}
+		tlsConn := tls.Client(rawConn, &tls.Config{
+			ServerName: host,
+			MinVersion: tls.VersionTLS12,
+		})
+		if err := tlsConn.HandshakeContext(context.Background()); err != nil {
+			rawConn.Close()
+			return nil, fmt.Errorf("TLS handshake with upstream proxy: %w", err)
+		}
+		conn = tlsConn
+	}
+
+	// Build CONNECT request.
+	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", targetHost, targetHost)
+
+	// Add upstream proxy authentication if present.
+	if upstreamURL.User != nil {
+		creds := upstreamURL.User.String()
+		encoded := base64.StdEncoding.EncodeToString([]byte(creds))
+		connectReq += fmt.Sprintf("Proxy-Authorization: Basic %s\r\n", encoded)
+	}
+	connectReq += "\r\n"
+
+	if _, err := conn.Write([]byte(connectReq)); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("send CONNECT to upstream: %w", err)
+	}
+
+	// Read upstream proxy response.
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("read CONNECT response from upstream: %w", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		conn.Close()
+		return nil, fmt.Errorf("upstream proxy CONNECT returned %d", resp.StatusCode)
+	}
+
+	return conn, nil
+}
+
 func handleTunneling(w http.ResponseWriter, r *http.Request) {
-	destConn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
+	destConn, err := dialUpstream(r.Host)
 	if err != nil {
 		slog.Error("Can't connect to host", "host", r.Host, "error", err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
