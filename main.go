@@ -210,6 +210,11 @@ func applyEnvOverrides(c *Config) {
 }
 
 func basicAuth(w http.ResponseWriter, r *http.Request) bool {
+	// Authentication disabled when no credentials are configured.
+	if config.Username == "" && config.Password == "" {
+		return true
+	}
+
 	auth := r.Header.Get("Proxy-Authorization")
 	if auth == "" {
 		slog.Debug("No Proxy-Authorization header", "remote", r.RemoteAddr)

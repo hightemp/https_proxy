@@ -9,8 +9,8 @@ services:
     environment:
       PROXY_ADDR: 0.0.0.0:8080
       PROXY_PROTO: http
-      PROXY_USERNAME: ${PROXY_USERNAME:-user}
-      PROXY_PASSWORD: ${PROXY_PASSWORD:-pass}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
       PROXY_UPSTREAM_PROXY: ${PROXY_UPSTREAM_PROXY:-}
 
   # HTTPS proxy with Let's Encrypt certificates (read from shared volume)
@@ -23,8 +23,8 @@ services:
     environment:
       PROXY_ADDR: 0.0.0.0:8443
       PROXY_PROTO: https
-      PROXY_USERNAME: ${PROXY_USERNAME:-user}
-      PROXY_PASSWORD: ${PROXY_PASSWORD:-pass}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
       PROXY_CERT_PATH: /etc/letsencrypt/live/${DOMAIN:?DOMAIN must be set in .env}/fullchain.pem
       PROXY_KEY_PATH: /etc/letsencrypt/live/${DOMAIN}/privkey.pem
       PROXY_UPSTREAM_PROXY: ${PROXY_UPSTREAM_PROXY:-}

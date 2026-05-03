@@ -30,19 +30,21 @@ Download the latest binary from the [Releases](https://github.com/hightemp/https
 
 ### Docker
 
-One-liner (HTTP proxy on port 8080, default user/pass `user`/`pass`):
+One-liner (HTTP proxy on port 8080, **no authentication**):
 
 ```sh
 docker run -d --name https_proxy -p 8080:8080 hightemp/https_proxy:latest
 ```
 
-Override credentials via env vars (no config file needed):
+Enable Basic auth via env vars:
 
 ```sh
 docker run -d --name https_proxy -p 8080:8080 \
   -e PROXY_USERNAME=alice -e PROXY_PASSWORD=s3cret \
   hightemp/https_proxy:latest
 ```
+
+> If both `username` and `password` are empty, authentication is disabled.
 
 With a custom config:
 

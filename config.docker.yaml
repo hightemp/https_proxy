@@ -1,6 +1,6 @@
 proxy_addr: 0.0.0.0:8080
-username: user
-password: pass
+username: ""
+password: ""
 proto: http
 cert_path: ""
 key_path: ""
