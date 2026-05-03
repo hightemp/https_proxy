@@ -184,9 +184,7 @@ func main() {
 // Supported variables:
 //
 //	PROXY_ADDR, PROXY_USERNAME, PROXY_PASSWORD, PROXY_PROTO,
-//	PROXY_CERT_PATH, PROXY_KEY_PATH, PROXY_UPSTREAM_PROXY,
-//	PROXY_CERT_DOMAIN — when set (and cert/key paths are not explicitly provided),
-//	  resolves to /etc/letsencrypt/live/$PROXY_CERT_DOMAIN/{fullchain,privkey}.pem.
+//	PROXY_CERT_PATH, PROXY_KEY_PATH, PROXY_UPSTREAM_PROXY.
 func applyEnvOverrides(c *Config) {
 	if v := os.Getenv("PROXY_ADDR"); v != "" {
 		c.ProxyAddr = v
@@ -208,14 +206,6 @@ func applyEnvOverrides(c *Config) {
 	}
 	if v := os.Getenv("PROXY_UPSTREAM_PROXY"); v != "" {
 		c.UpstreamProxy = v
-	}
-	if domain := os.Getenv("PROXY_CERT_DOMAIN"); domain != "" {
-		if c.CertPath == "" {
-			c.CertPath = "/etc/letsencrypt/live/" + domain + "/fullchain.pem"
-		}
-		if c.KeyPath == "" {
-			c.KeyPath = "/etc/letsencrypt/live/" + domain + "/privkey.pem"
-		}
 	}
 }
 

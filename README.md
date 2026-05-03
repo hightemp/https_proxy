@@ -63,7 +63,6 @@ Any of these override the corresponding YAML field:
 | `PROXY_CERT_PATH` | `cert_path` |
 | `PROXY_KEY_PATH` | `key_path` |
 | `PROXY_UPSTREAM_PROXY` | `upstream_proxy` |
-| `PROXY_CERT_DOMAIN` | shorthand: sets `cert_path`/`key_path` to `/etc/letsencrypt/live/$PROXY_CERT_DOMAIN/fullchain.pem` and `privkey.pem` (only if those are not already set) |
 
 ### Docker Compose (HTTP + HTTPS with Let's Encrypt)
 

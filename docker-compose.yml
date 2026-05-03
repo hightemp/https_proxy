@@ -25,7 +25,8 @@ services:
       PROXY_PROTO: https
       PROXY_USERNAME: ${PROXY_USERNAME:-user}
       PROXY_PASSWORD: ${PROXY_PASSWORD:-pass}
-      PROXY_CERT_DOMAIN: ${DOMAIN:?DOMAIN must be set in .env}
+      PROXY_CERT_PATH: /etc/letsencrypt/live/${DOMAIN:?DOMAIN must be set in .env}/fullchain.pem
+      PROXY_KEY_PATH: /etc/letsencrypt/live/${DOMAIN}/privkey.pem
       PROXY_UPSTREAM_PROXY: ${PROXY_UPSTREAM_PROXY:-}
     volumes:
       - letsencrypt:/etc/letsencrypt:ro
