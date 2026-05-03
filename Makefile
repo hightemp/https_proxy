@@ -3,8 +3,9 @@ VERSION = $(shell cat VERSION | tr -d '[:space:]')
 INSTALL_DIR = /usr/bin
 CONFIG_DIR = /etc/$(PROJECT_NAME)
 SYSTEMD_DIR = /etc/systemd/system
+DOCKER_IMAGE = hightemp/$(PROJECT_NAME)
 
-.PHONY: build run clean install uninstall install-service uninstall-service start stop restart status enable disable release
+.PHONY: build run clean install uninstall install-service uninstall-service start stop restart status enable disable release docker-build docker-push docker-release
 
 build:
 	CGO_ENABLED=0 go build -o $(PROJECT_NAME) main.go
@@ -98,3 +99,13 @@ release:
 	git push
 	git push -f --tags
 	@echo "Released v$(VERSION)"
+
+docker-build:
+	docker build -t $(DOCKER_IMAGE):$(VERSION) -t $(DOCKER_IMAGE):latest .
+
+docker-push: docker-build
+	docker push $(DOCKER_IMAGE):$(VERSION)
+	docker push $(DOCKER_IMAGE):latest
+
+docker-release: docker-push
+	@echo "Pushed $(DOCKER_IMAGE):$(VERSION) and :latest"

@@ -28,6 +28,50 @@ A secure HTTP/HTTPS proxy server in Go with Basic authentication, TLS support, a
 
 Download the latest binary from the [Releases](https://github.com/hightemp/https_proxy/releases) page.
 
+### Docker
+
+One-liner (HTTP proxy on port 8080, default user/pass `user`/`pass`):
+
+```sh
+docker run -d --name https_proxy -p 8080:8080 hightemp/https_proxy:latest
+```
+
+With a custom config:
+
+```sh
+docker run -d --name https_proxy -p 8080:8080 -v $(pwd)/config.yaml:/etc/https_proxy/config.yaml:ro hightemp/https_proxy:latest
+```
+
+### Docker Compose (HTTP + HTTPS with Let's Encrypt)
+
+The bundled [docker-compose.yml](docker-compose.yml) starts an HTTP proxy, an HTTPS proxy, and a `certbot` sidecar that issues and auto-renews Let's Encrypt certificates into a shared volume.
+
+1. Copy example configs and edit them (set domain, credentials, ports):
+
+    ```sh
+    cp config.http.example.yaml config.http.yaml
+    cp config.https.example.yaml config.https.yaml
+    ```
+
+2. Issue the initial Let's Encrypt certificate (port 80 must be reachable on your domain):
+
+    ```sh
+    docker compose run --rm --service-ports certbot certonly \
+      --standalone -d example.com -m you@example.com --agree-tos --no-eff-email
+    ```
+
+3. Start the stack:
+
+    ```sh
+    docker compose up -d
+    ```
+
+Certbot will renew certificates automatically every 12 hours. Restart the HTTPS proxy after renewal if needed:
+
+```sh
+docker compose restart https-proxy
+```
+
 ### Build from source
 
 1. Clone the repository:
@@ -131,6 +175,9 @@ make start / stop / restart / status
 | `make uninstall` | Remove binary and service (keep config) |
 | `make uninstall-full` | Remove everything including config |
 | `make release` | Tag version from `VERSION` file and push |
+| `make docker-build` | Build Docker image `hightemp/https_proxy:VERSION` and `:latest` |
+| `make docker-push` | Build and push image to Docker Hub |
+| `make docker-release` | Alias for `docker-push` |
 
 ## Release
 

@@ -1,0 +1,7 @@
+proxy_addr: 0.0.0.0:8443
+username: user
+password: pass
+proto: https
+cert_path: /etc/letsencrypt/live/example.com/fullchain.pem
+key_path: /etc/letsencrypt/live/example.com/privkey.pem
+# upstream_proxy: https://user:pass@upstream-proxy:8080

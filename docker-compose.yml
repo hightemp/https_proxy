@@ -1,0 +1,43 @@
+services:
+  # Plain HTTP proxy
+  http-proxy:
+    image: hightemp/https_proxy:latest
+    container_name: https_proxy_http
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.http.yaml:/etc/https_proxy/config.yaml:ro
+
+  # HTTPS proxy with Let's Encrypt certificates (read from shared volume)
+  https-proxy:
+    image: hightemp/https_proxy:latest
+    container_name: https_proxy_https
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./config.https.yaml:/etc/https_proxy/config.yaml:ro
+      - letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - certbot
+
+  # Let's Encrypt certificate manager.
+  # First-time issue (replace DOMAIN and EMAIL):
+  #   docker compose run --rm --service-ports certbot certonly \
+  #     --standalone -d DOMAIN -m EMAIL --agree-tos --no-eff-email
+  # Then `docker compose up -d` runs auto-renewal in a loop.
+  certbot:
+    image: certbot/certbot:latest
+    container_name: https_proxy_certbot
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done"
+
+volumes:
+  letsencrypt:
+  certbot-www:
