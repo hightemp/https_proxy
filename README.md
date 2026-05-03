@@ -1,5 +1,12 @@
 # Secure HTTP Proxy Server
 
+[![Go Version](https://img.shields.io/github/go-mod/go-version/hightemp/https_proxy)](go.mod)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/hightemp/https_proxy)](https://github.com/hightemp/https_proxy/releases)
+[![GitHub Downloads](https://img.shields.io/github/downloads/hightemp/https_proxy/total)](https://github.com/hightemp/https_proxy/releases)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/hightemp/https_proxy/release.yml)](https://github.com/hightemp/https_proxy/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/hightemp/https_proxy)](https://goreportcard.com/report/github.com/hightemp/https_proxy)
+
 A secure HTTP/HTTPS proxy server in Go with Basic authentication, TLS support, and upstream proxy chaining.
 
 ## Features
