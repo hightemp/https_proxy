@@ -6,8 +6,12 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    volumes:
-      - ./config.http.yaml:/etc/https_proxy/config.yaml:ro
+    environment:
+      PROXY_ADDR: 0.0.0.0:8080
+      PROXY_PROTO: http
+      PROXY_USERNAME: ${PROXY_USERNAME:-user}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-pass}
+      PROXY_UPSTREAM_PROXY: ${PROXY_UPSTREAM_PROXY:-}
 
   # HTTPS proxy with Let's Encrypt certificates (read from shared volume)
   https-proxy:
@@ -16,27 +20,48 @@ services:
     restart: unless-stopped
     ports:
       - "8443:8443"
+    environment:
+      PROXY_ADDR: 0.0.0.0:8443
+      PROXY_PROTO: https
+      PROXY_USERNAME: ${PROXY_USERNAME:-user}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-pass}
+      PROXY_CERT_DOMAIN: ${DOMAIN:?DOMAIN must be set in .env}
+      PROXY_UPSTREAM_PROXY: ${PROXY_UPSTREAM_PROXY:-}
     volumes:
-      - ./config.https.yaml:/etc/https_proxy/config.yaml:ro
       - letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - certbot
 
   # Let's Encrypt certificate manager.
-  # First-time issue (replace DOMAIN and EMAIL):
-  #   docker compose run --rm --service-ports certbot certonly \
-  #     --standalone -d DOMAIN -m EMAIL --agree-tos --no-eff-email
+  # First-time issue:
+  #   docker compose run --rm --service-ports certbot issue
   # Then `docker compose up -d` runs auto-renewal in a loop.
   certbot:
     image: certbot/certbot:latest
     container_name: https_proxy_certbot
     restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set in .env}
+      EMAIL: ${EMAIL:?EMAIL must be set in .env}
     ports:
       - "80:80"
     volumes:
       - letsencrypt:/etc/letsencrypt
       - certbot-www:/var/www/certbot
-    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ "$$1" = "issue" ]; then
+          exec certbot certonly --standalone \
+            -d "$$DOMAIN" -m "$$EMAIL" --agree-tos --no-eff-email --non-interactive
+        fi
+        trap exit TERM
+        while :; do
+          certbot renew --quiet
+          sleep 12h & wait $${!}
+        done
+      - --
 
 volumes:
   letsencrypt:

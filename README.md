@@ -36,28 +36,50 @@ One-liner (HTTP proxy on port 8080, default user/pass `user`/`pass`):
 docker run -d --name https_proxy -p 8080:8080 hightemp/https_proxy:latest
 ```
 
+Override credentials via env vars (no config file needed):
+
+```sh
+docker run -d --name https_proxy -p 8080:8080 \
+  -e PROXY_USERNAME=alice -e PROXY_PASSWORD=s3cret \
+  hightemp/https_proxy:latest
+```
+
 With a custom config:
 
 ```sh
 docker run -d --name https_proxy -p 8080:8080 -v $(pwd)/config.yaml:/etc/https_proxy/config.yaml:ro hightemp/https_proxy:latest
 ```
 
+#### Environment variables
+
+Any of these override the corresponding YAML field:
+
+| Variable | Overrides |
+|---|---|
+| `PROXY_ADDR` | `proxy_addr` |
+| `PROXY_USERNAME` | `username` |
+| `PROXY_PASSWORD` | `password` |
+| `PROXY_PROTO` | `proto` (`http` / `https`) |
+| `PROXY_CERT_PATH` | `cert_path` |
+| `PROXY_KEY_PATH` | `key_path` |
+| `PROXY_UPSTREAM_PROXY` | `upstream_proxy` |
+| `PROXY_CERT_DOMAIN` | shorthand: sets `cert_path`/`key_path` to `/etc/letsencrypt/live/$PROXY_CERT_DOMAIN/fullchain.pem` and `privkey.pem` (only if those are not already set) |
+
 ### Docker Compose (HTTP + HTTPS with Let's Encrypt)
 
-The bundled [docker-compose.yml](docker-compose.yml) starts an HTTP proxy, an HTTPS proxy, and a `certbot` sidecar that issues and auto-renews Let's Encrypt certificates into a shared volume.
+The bundled [docker-compose.yml](docker-compose.yml) starts an HTTP proxy, an HTTPS proxy, and a `certbot` sidecar that issues and auto-renews Let's Encrypt certificates into a shared volume. All settings come from a `.env` file — no YAML editing required.
 
-1. Copy example configs and edit them (set domain, credentials, ports):
+1. Copy the env template and fill it in:
 
     ```sh
-    cp config.http.example.yaml config.http.yaml
-    cp config.https.example.yaml config.https.yaml
+    cp .env.example .env
+    # edit DOMAIN, EMAIL, PROXY_USERNAME, PROXY_PASSWORD
     ```
 
-2. Issue the initial Let's Encrypt certificate (port 80 must be reachable on your domain):
+2. Issue the initial Let's Encrypt certificate (port 80 must be reachable on `$DOMAIN`):
 
     ```sh
-    docker compose run --rm --service-ports certbot certonly \
-      --standalone -d example.com -m you@example.com --agree-tos --no-eff-email
+    docker compose run --rm --service-ports certbot issue
     ```
 
 3. Start the stack:
@@ -66,7 +88,7 @@ The bundled [docker-compose.yml](docker-compose.yml) starts an HTTP proxy, an HT
     docker compose up -d
     ```
 
-Certbot will renew certificates automatically every 12 hours. Restart the HTTPS proxy after renewal if needed:
+Certbot renews certificates automatically every 12 hours. Restart the HTTPS proxy after a renewal if needed:
 
 ```sh
 docker compose restart https-proxy

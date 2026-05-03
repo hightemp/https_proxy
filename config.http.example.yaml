@@ -1,7 +1,0 @@
-proxy_addr: 0.0.0.0:8080
-username: user
-password: pass
-proto: http
-cert_path: ""
-key_path: ""
-# upstream_proxy: https://user:pass@upstream-proxy:8080
