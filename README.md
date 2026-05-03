@@ -30,6 +30,8 @@ Download the latest binary from the [Releases](https://github.com/hightemp/https
 
 ### Docker
 
+https://hub.docker.com/repository/docker/hightemp/https_proxy/general
+
 One-liner (HTTP proxy on port 8080, **no authentication**):
 
 ```sh
