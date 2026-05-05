@@ -1,5 +1,6 @@
 # Secure HTTP Proxy Server
 
+[![GitHub Repo](https://img.shields.io/badge/github-hightemp%2Fhttps__proxy-blue?logo=github)](https://github.com/hightemp/https_proxy)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/hightemp/https_proxy)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/hightemp/https_proxy)](https://github.com/hightemp/https_proxy/releases)
