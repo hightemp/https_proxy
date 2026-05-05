@@ -8,6 +8,7 @@ COPY main.go ./
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/https_proxy main.go
 
 FROM alpine:3.20
+LABEL org.opencontainers.image.source="https://github.com/hightemp/https_proxy"
 RUN apk add --no-cache ca-certificates tini \
     && adduser -D -H -u 10001 proxy
 COPY --from=builder /out/https_proxy /usr/bin/https_proxy
