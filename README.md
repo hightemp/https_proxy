@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/hightemp/https_proxy)](https://github.com/hightemp/https_proxy/releases)
 [![GitHub Downloads](https://img.shields.io/github/downloads/hightemp/https_proxy/total)](https://github.com/hightemp/https_proxy/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/hightemp/https_proxy.svg)](https://hub.docker.com/r/hightemp/https_proxy)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/hightemp/https_proxy/release.yml)](https://github.com/hightemp/https_proxy/actions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/hightemp/https_proxy)](https://goreportcard.com/report/github.com/hightemp/https_proxy)
 
@@ -31,7 +32,7 @@ Download the latest binary from the [Releases](https://github.com/hightemp/https
 
 ### Docker
 
-https://hub.docker.com/repository/docker/hightemp/https_proxy/general
+https://hub.docker.com/r/hightemp/https_proxy
 
 One-liner (HTTP proxy on port 8080, **no authentication**):
 
