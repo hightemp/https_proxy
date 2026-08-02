@@ -53,7 +53,7 @@ nfpms:
         dst: /etc/https_proxy/config.yaml
         type: config
         file_info:
-          mode: 0644
+          mode: 0600
       - src: packaging/https_proxy.service
         dst: /lib/systemd/system/https_proxy.service
         type: config

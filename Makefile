@@ -27,9 +27,10 @@ install: build
 	install -d $(CONFIG_DIR)
 	install -m 755 $(PROJECT_NAME) $(INSTALL_DIR)/$(PROJECT_NAME)
 	@if [ ! -f $(CONFIG_DIR)/config.yaml ]; then \
-		install -m 644 config.example.yaml $(CONFIG_DIR)/config.yaml; \
+		install -m 600 config.example.yaml $(CONFIG_DIR)/config.yaml; \
 		echo "Config installed: $(CONFIG_DIR)/config.yaml"; \
 	else \
+		chmod 600 $(CONFIG_DIR)/config.yaml; \
 		echo "Config already exists, skipping: $(CONFIG_DIR)/config.yaml"; \
 	fi
 	install -m 644 packaging/$(PROJECT_NAME).service $(SYSTEMD_DIR)/$(PROJECT_NAME).service

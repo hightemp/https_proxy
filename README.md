@@ -8,6 +8,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/hightemp/https_proxy.svg)](https://hub.docker.com/r/hightemp/https_proxy)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/hightemp/https_proxy/release.yml)](https://github.com/hightemp/https_proxy/actions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/hightemp/https_proxy)](https://goreportcard.com/report/github.com/hightemp/https_proxy)
+[![](https://asdertasd.site/counter/https_proxy?a=1)](https://asdertasd.site/counter/https_proxy)
 
 A secure HTTP/HTTPS proxy server in Go with Basic authentication, TLS support, and upstream proxy chaining.
 
@@ -20,9 +21,11 @@ A secure HTTP/HTTPS proxy server in Go with Basic authentication, TLS support, a
   - Supports HTTP and HTTPS upstream proxies
   - Configurable via `config.yaml` or environment variables (`HTTPS_PROXY`, `HTTP_PROXY`)
   - Basic authentication to upstream proxy
+- Selectable outbound network (`auto`, IPv4-only, or IPv6-only)
+- Bounded dial, TLS handshake, and response-header timeouts
 - Configurable via YAML file
 - Systemd service support
-- Graceful shutdown
+- Graceful shutdown of HTTP requests and hijacked CONNECT tunnels
 
 ## Installation
 
@@ -69,6 +72,13 @@ Any of these override the corresponding YAML field:
 | `PROXY_CERT_PATH` | `cert_path` |
 | `PROXY_KEY_PATH` | `key_path` |
 | `PROXY_UPSTREAM_PROXY` | `upstream_proxy` |
+| `PROXY_NETWORK` | `network` (`auto` / `tcp4` / `tcp6`) |
+| `PROXY_DIAL_TIMEOUT` | `dial_timeout` |
+| `PROXY_TLS_HANDSHAKE_TIMEOUT` | `tls_handshake_timeout` |
+| `PROXY_RESPONSE_HEADER_TIMEOUT` | `response_header_timeout` |
+| `PROXY_READ_HEADER_TIMEOUT` | `read_header_timeout` |
+| `PROXY_IDLE_TIMEOUT` | `idle_timeout` |
+| `PROXY_SHUTDOWN_TIMEOUT` | `shutdown_timeout` |
 
 ### Docker Compose (HTTP + HTTPS with Let's Encrypt)
 
@@ -119,14 +129,23 @@ docker compose restart https-proxy
 Create a `config.yaml` file (see `config.example.yaml`):
 
 ```yaml
-proxy_addr: 0.0.0.0:8080
+proxy_addr: 127.0.0.1:8080
 username: "your_username"
 password: "your_password"
-proto: https
-cert_path: "path/to/your/cert.pem"
-key_path: "path/to/your/key.pem"
+proto: http
+cert_path: ""
+key_path: ""
+network: auto
+dial_timeout: 10s
+tls_handshake_timeout: 10s
+response_header_timeout: 30s
+read_header_timeout: 15s
+idle_timeout: 2m
+shutdown_timeout: 15s
 # upstream_proxy: http://user:pass@upstream-proxy:8080
 ```
+
+The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when the proxy must accept remote connections, and configure authentication before exposing it.
 
 | Parameter | Description |
 |---|---|
@@ -137,6 +156,25 @@ key_path: "path/to/your/key.pem"
 | `cert_path` | Path to TLS certificate (for `https` mode) |
 | `key_path` | Path to TLS private key (for `https` mode) |
 | `upstream_proxy` | Upstream proxy URL for chaining (optional) |
+| `network` | Outbound address family: `auto`, `tcp4`, or `tcp6` |
+| `dial_timeout` | TCP connection timeout |
+| `tls_handshake_timeout` | Outbound TLS handshake timeout |
+| `response_header_timeout` | Upstream CONNECT/HTTP response-header timeout |
+| `read_header_timeout` | Incoming request-header timeout |
+| `idle_timeout` | Incoming keep-alive idle timeout |
+| `shutdown_timeout` | Graceful shutdown deadline |
+
+Timeout values use Go duration syntax, for example `500ms`, `10s`, or `2m`. Unknown YAML keys and invalid values stop the proxy at startup instead of being silently ignored.
+
+### Outbound network
+
+`network: auto` uses Go's normal dual-stack dialing. If the server advertises IPv6 but its IPv6 route is broken, use IPv4-only dialing so affected requests fail over immediately:
+
+```yaml
+network: tcp4
+```
+
+The setting applies to direct CONNECT targets, ordinary forwarded HTTP requests, and the connection to an upstream proxy. When chaining through an upstream proxy, that upstream still resolves and connects to the final target itself.
 
 ### Upstream Proxy (Proxy Chain)
 
@@ -153,6 +191,8 @@ upstream_proxy: https://user:pass@upstream-proxy:8443
 ```
 
 If `upstream_proxy` is not set in the config, the proxy falls back to standard environment variables (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`).
+
+An explicitly configured upstream URL is validated at startup and never silently falls back to a direct connection. Percent-encode reserved characters in credentials, for example `user%40example` for `user@example` and `p%3Ass` for `p:ss`.
 
 ### TLS Certificates
 
@@ -220,5 +260,3 @@ make start / stop / restart / status
 ## License
 
 This project is licensed under the MIT License.
-
-[![](https://asdertasd.site/counter/https_proxy?a=1)](https://asdertasd.site/counter/https_proxy)

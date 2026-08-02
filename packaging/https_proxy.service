@@ -1,10 +1,22 @@
 [Unit]
 Description=HTTPS proxy
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 ExecStart=/usr/bin/https_proxy --config /etc/https_proxy/config.yaml
 Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=30s
+LimitNOFILE=65536
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=multi-user.target

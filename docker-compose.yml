@@ -12,6 +12,7 @@ services:
       PROXY_USERNAME: ${PROXY_USERNAME:-}
       PROXY_PASSWORD: ${PROXY_PASSWORD:-}
       PROXY_UPSTREAM_PROXY: ${PROXY_UPSTREAM_PROXY:-}
+      PROXY_NETWORK: ${PROXY_NETWORK:-auto}
 
   # HTTPS proxy with Let's Encrypt certificates (read from shared volume)
   https-proxy:
@@ -28,6 +29,7 @@ services:
       PROXY_CERT_PATH: /etc/letsencrypt/live/${DOMAIN:?DOMAIN must be set in .env}/fullchain.pem
       PROXY_KEY_PATH: /etc/letsencrypt/live/${DOMAIN}/privkey.pem
       PROXY_UPSTREAM_PROXY: ${PROXY_UPSTREAM_PROXY:-}
+      PROXY_NETWORK: ${PROXY_NETWORK:-auto}
     volumes:
       - letsencrypt:/etc/letsencrypt:ro
     depends_on:
