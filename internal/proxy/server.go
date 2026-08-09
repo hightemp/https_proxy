@@ -39,12 +39,14 @@ var bufferPool = sync.Pool{
 
 // Server handles authenticated HTTP proxy and CONNECT requests.
 type Server struct {
-	config        config.Config
-	authenticator *auth.Basic
-	httpClient    *http.Client
-	proxyFunc     func(*http.Request) (*url.URL, error)
-	dialer        *net.Dialer
-	tunnels       *tunnel.Registry
+	config         config.Config
+	authenticator  *auth.Basic
+	httpClient     *http.Client
+	proxyFunc      func(*http.Request) (*url.URL, error)
+	dialer         *net.Dialer
+	tunnels        *tunnel.Registry
+	tunnelLimiter  *concurrentLimiter
+	destinationACL *destinationACL
 }
 
 // NewServer validates config and creates a proxy handler.
@@ -64,11 +66,21 @@ func NewServer(cfg config.Config) (*Server, error) {
 	dialer := &net.Dialer{Timeout: time.Duration(cfg.DialTimeout), KeepAlive: 30 * time.Second}
 
 	server := &Server{
-		config:        cfg,
-		authenticator: auth.NewBasic(cfg.Username, cfg.Password, cfg.LogSensitiveData),
-		proxyFunc:     proxyFunc,
-		dialer:        dialer,
-		tunnels:       tunnel.NewRegistry(),
+		config: cfg,
+		authenticator: auth.NewBasic(cfg.Username, cfg.Password, auth.BasicOptions{
+			LogSensitiveData: cfg.LogSensitiveData,
+			MaxFailures:      cfg.AuthMaxFailures,
+			FailureWindow:    time.Duration(cfg.AuthFailureWindow),
+			BlockDuration:    time.Duration(cfg.AuthBlockDuration),
+		}),
+		proxyFunc: proxyFunc,
+		dialer:    dialer,
+		tunnels:   tunnel.NewRegistry(),
+		tunnelLimiter: newConcurrentLimiter(
+			cfg.MaxTunnels,
+			cfg.MaxTunnelsPerIP,
+		),
+		destinationACL: newDestinationACL(cfg),
 	}
 	transport := &http.Transport{
 		Proxy:                 proxyFunc,
@@ -155,6 +167,17 @@ func removeHopByHopHeaders(header http.Header) {
 }
 
 func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	destination, err := requestDestination(r.URL)
+	if err != nil {
+		slog.Warn("Invalid HTTP destination", "url", p.requestURLForLog(r))
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	if err := p.checkDestination(r.Context(), destination); err != nil {
+		p.writeDestinationError(w, r, err)
+		return
+	}
+
 	outRequest := r.Clone(r.Context())
 	outRequest.RequestURI = ""
 	outRequest.Host = outRequest.URL.Host
@@ -207,6 +230,18 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
+	releaseTunnel, ok := p.tunnelLimiter.tryAcquire(addressHost(r.RemoteAddr))
+	if !ok {
+		slog.Warn("Tunnel limit exceeded", "remote", r.RemoteAddr)
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+		return
+	}
+	defer releaseTunnel()
+	if err := p.checkDestination(r.Context(), r.Host); err != nil {
+		p.writeDestinationError(w, r, err)
+		return
+	}
 
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
@@ -256,7 +291,27 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientSource := tunnel.NewBufferedConn(client, readWriter.Reader)
-	tunnel.Relay(client, clientSource, destination)
+	tunnel.Relay(client, clientSource, destination, time.Duration(p.config.TunnelIdleTimeout))
+}
+
+func (p *Server) checkDestination(ctx context.Context, address string) error {
+	checkContext, cancel := context.WithTimeout(ctx, time.Duration(p.config.DialTimeout))
+	defer cancel()
+	return p.destinationACL.check(checkContext, address)
+}
+
+func (p *Server) writeDestinationError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, errDestinationDenied) {
+		logError := any(http.StatusText(http.StatusForbidden))
+		if p.config.LogSensitiveData {
+			logError = err
+		}
+		slog.Warn("Destination blocked", "url", p.requestURLForLog(r), "error", logError)
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+	slog.Error("Could not check destination", "url", p.requestURLForLog(r), "error", p.errorForLog(err))
+	writeUpstreamError(w, err)
 }
 
 var _ http.Handler = (*Server)(nil)

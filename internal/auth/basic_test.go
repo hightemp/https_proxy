@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBasicAuthenticate(t *testing.T) {
@@ -37,7 +38,7 @@ func TestBasicAuthenticate(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			authenticator := NewBasic(test.username, test.password, false)
+			authenticator := NewBasic(test.username, test.password, BasicOptions{})
 			request := httptest.NewRequest(http.MethodGet, "http://example.test", nil)
 			if test.header != "" {
 				request.Header.Set("Proxy-Authorization", test.header)
@@ -81,7 +82,7 @@ func TestBasicAuthenticateSensitiveLogging(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 			defer slog.SetDefault(previousLogger)
 
-			authenticator := NewBasic("expected-user", "correct-password", test.sensitive)
+			authenticator := NewBasic("expected-user", "correct-password", BasicOptions{LogSensitiveData: test.sensitive})
 			request := httptest.NewRequest(http.MethodGet, "http://example.test", nil)
 			credentials := base64.StdEncoding.EncodeToString([]byte("attempted-user:wrong-password"))
 			request.Header.Set("Proxy-Authorization", "Basic "+credentials)
@@ -96,5 +97,45 @@ func TestBasicAuthenticateSensitiveLogging(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBasicAuthenticateRateLimitsFailuresPerIP(t *testing.T) {
+	now := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+	authenticator := NewBasic("alice", "correct", BasicOptions{
+		MaxFailures:   2,
+		FailureWindow: time.Minute,
+		BlockDuration: 5 * time.Minute,
+	})
+	authenticator.failures.now = func() time.Time { return now }
+
+	authenticate := func(remoteAddress, password string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "http://example.test", nil)
+		request.RemoteAddr = remoteAddress
+		credentials := base64.StdEncoding.EncodeToString([]byte("alice:" + password))
+		request.Header.Set("Proxy-Authorization", "Basic "+credentials)
+		response := httptest.NewRecorder()
+		authenticator.Authenticate(response, request)
+		return response
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if response := authenticate("192.0.2.10:1234", "wrong"); response.Code != http.StatusProxyAuthRequired {
+			t.Fatalf("failed attempt %d status = %d, want %d", attempt, response.Code, http.StatusProxyAuthRequired)
+		}
+	}
+	if response := authenticate("192.0.2.10:5678", "correct"); response.Code != http.StatusTooManyRequests {
+		t.Fatalf("blocked attempt status = %d, want %d", response.Code, http.StatusTooManyRequests)
+	} else if response.Header().Get("Retry-After") != "300" {
+		t.Fatalf("Retry-After = %q, want %q", response.Header().Get("Retry-After"), "300")
+	}
+	if response := authenticate("192.0.2.11:1234", "correct"); response.Code != http.StatusOK {
+		t.Fatalf("other IP status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	now = now.Add(5 * time.Minute)
+	if response := authenticate("192.0.2.10:1234", "correct"); response.Code != http.StatusOK {
+		t.Fatalf("attempt after block status = %d, want %d", response.Code, http.StatusOK)
 	}
 }

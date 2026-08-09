@@ -6,11 +6,22 @@ cert_path: ./cert.pem
 key_path: ./key.pem
 network: auto
 log_sensitive_data: false
+max_connections: 1024
+max_connections_per_ip: 64
+max_tunnels: 256
+max_tunnels_per_ip: 16
+max_header_bytes: 65536
+auth_max_failures: 10
+allow_private_destinations: false
+blocked_destination_ports: [21, 22, 23, 25, 110, 111, 135, 137, 138, 139, 445, 1433, 2049, 2375, 2376, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017]
 dial_timeout: 10s
 tls_handshake_timeout: 10s
 response_header_timeout: 30s
 read_header_timeout: 15s
 idle_timeout: 2m
+tunnel_idle_timeout: 10m
+auth_failure_window: 1m
+auth_block_duration: 5m
 shutdown_timeout: 15s
 # upstream_proxy: https://user:pass@upstream-proxy:8080
 # upstream_proxy: direct  # Ignore HTTP_PROXY, HTTPS_PROXY, and NO_PROXY.

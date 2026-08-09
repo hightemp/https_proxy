@@ -1,6 +1,9 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +21,7 @@ func TestDecodeConfig(t *testing.T) {
 			check: func(t *testing.T, got Config) {
 				t.Helper()
 				want := defaultConfig()
-				if got != want {
+				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("decodeConfig() = %+v, want %+v", got, want)
 				}
 			},
@@ -29,11 +32,22 @@ func TestDecodeConfig(t *testing.T) {
 				"proxy_addr: 0.0.0.0:3128",
 				"network: tcp4",
 				"log_sensitive_data: true",
+				"max_connections: 200",
+				"max_connections_per_ip: 20",
+				"max_tunnels: 50",
+				"max_tunnels_per_ip: 5",
+				"max_header_bytes: 32768",
+				"auth_max_failures: 7",
+				"allow_private_destinations: true",
+				"blocked_destination_ports: [22, 25]",
 				"dial_timeout: 250ms",
 				"tls_handshake_timeout: 3s",
 				"response_header_timeout: 4s",
 				"read_header_timeout: 5s",
 				"idle_timeout: 6m",
+				"tunnel_idle_timeout: 8m",
+				"auth_failure_window: 9m",
+				"auth_block_duration: 10m",
 				"shutdown_timeout: 7s",
 			}, "\n") + "\n",
 			check: func(t *testing.T, got Config) {
@@ -47,6 +61,33 @@ func TestDecodeConfig(t *testing.T) {
 				if !got.LogSensitiveData {
 					t.Error("LogSensitiveData = false, want true")
 				}
+				if !got.AllowPrivateDestinations {
+					t.Error("AllowPrivateDestinations = false, want true")
+				}
+				wantLimits := map[string]int{
+					"MaxConnections":      200,
+					"MaxConnectionsPerIP": 20,
+					"MaxTunnels":          50,
+					"MaxTunnelsPerIP":     5,
+					"MaxHeaderBytes":      32768,
+					"AuthMaxFailures":     7,
+				}
+				gotLimits := map[string]int{
+					"MaxConnections":      got.MaxConnections,
+					"MaxConnectionsPerIP": got.MaxConnectionsPerIP,
+					"MaxTunnels":          got.MaxTunnels,
+					"MaxTunnelsPerIP":     got.MaxTunnelsPerIP,
+					"MaxHeaderBytes":      got.MaxHeaderBytes,
+					"AuthMaxFailures":     got.AuthMaxFailures,
+				}
+				for name, want := range wantLimits {
+					if value := gotLimits[name]; value != want {
+						t.Errorf("%s = %d, want %d", name, value, want)
+					}
+				}
+				if want := []int{22, 25}; !reflect.DeepEqual(got.BlockedDestinationPorts, want) {
+					t.Errorf("BlockedDestinationPorts = %v, want %v", got.BlockedDestinationPorts, want)
+				}
 
 				wantDurations := map[string]time.Duration{
 					"DialTimeout":           250 * time.Millisecond,
@@ -54,6 +95,9 @@ func TestDecodeConfig(t *testing.T) {
 					"ResponseHeaderTimeout": 4 * time.Second,
 					"ReadHeaderTimeout":     5 * time.Second,
 					"IdleTimeout":           6 * time.Minute,
+					"TunnelIdleTimeout":     8 * time.Minute,
+					"AuthFailureWindow":     9 * time.Minute,
+					"AuthBlockDuration":     10 * time.Minute,
 					"ShutdownTimeout":       7 * time.Second,
 				}
 				gotDurations := map[string]time.Duration{
@@ -62,6 +106,9 @@ func TestDecodeConfig(t *testing.T) {
 					"ResponseHeaderTimeout": time.Duration(got.ResponseHeaderTimeout),
 					"ReadHeaderTimeout":     time.Duration(got.ReadHeaderTimeout),
 					"IdleTimeout":           time.Duration(got.IdleTimeout),
+					"TunnelIdleTimeout":     time.Duration(got.TunnelIdleTimeout),
+					"AuthFailureWindow":     time.Duration(got.AuthFailureWindow),
+					"AuthBlockDuration":     time.Duration(got.AuthBlockDuration),
 					"ShutdownTimeout":       time.Duration(got.ShutdownTimeout),
 				}
 				for name, want := range wantDurations {
@@ -80,6 +127,27 @@ func TestDecodeConfig(t *testing.T) {
 				t.Fatalf("decodeConfig() error = %v", err)
 			}
 			tt.check(t, got)
+		})
+	}
+}
+
+func TestExampleConfigsAreValid(t *testing.T) {
+	for _, name := range []string{"config.example.yaml", "config.docker.yaml"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join("..", "..", name)
+			file, err := os.Open(path)
+			if err != nil {
+				t.Fatalf("open %s: %v", path, err)
+			}
+			defer file.Close()
+
+			cfg, err := decodeConfig(file)
+			if err != nil {
+				t.Fatalf("decode %s: %v", path, err)
+			}
+			if err := validateConfig(&cfg); err != nil {
+				t.Fatalf("validate %s: %v", path, err)
+			}
 		})
 	}
 }
@@ -241,6 +309,83 @@ func TestValidateConfig(t *testing.T) {
 			wantMessage: "shutdown_timeout must be greater than zero",
 		},
 		{
+			name: "nonpositive tunnel idle timeout",
+			mutate: func(config *Config) {
+				config.TunnelIdleTimeout = 0
+			},
+			wantMessage: "tunnel_idle_timeout must be greater than zero",
+		},
+		{
+			name: "nonpositive auth failure window",
+			mutate: func(config *Config) {
+				config.AuthFailureWindow = 0
+			},
+			wantMessage: "auth_failure_window must be greater than zero",
+		},
+		{
+			name: "nonpositive auth block duration",
+			mutate: func(config *Config) {
+				config.AuthBlockDuration = 0
+			},
+			wantMessage: "auth_block_duration must be greater than zero",
+		},
+		{
+			name: "nonpositive connection limit",
+			mutate: func(config *Config) {
+				config.MaxConnections = 0
+			},
+			wantMessage: "max_connections must be greater than zero",
+		},
+		{
+			name: "per-IP connections exceed global limit",
+			mutate: func(config *Config) {
+				config.MaxConnectionsPerIP = config.MaxConnections + 1
+			},
+			wantMessage: "max_connections_per_ip cannot exceed max_connections",
+		},
+		{
+			name: "nonpositive tunnel limit",
+			mutate: func(config *Config) {
+				config.MaxTunnels = 0
+			},
+			wantMessage: "max_tunnels must be greater than zero",
+		},
+		{
+			name: "per-IP tunnels exceed global limit",
+			mutate: func(config *Config) {
+				config.MaxTunnelsPerIP = config.MaxTunnels + 1
+			},
+			wantMessage: "max_tunnels_per_ip cannot exceed max_tunnels",
+		},
+		{
+			name: "nonpositive header limit",
+			mutate: func(config *Config) {
+				config.MaxHeaderBytes = 0
+			},
+			wantMessage: "max_header_bytes must be greater than zero",
+		},
+		{
+			name: "nonpositive auth failure limit",
+			mutate: func(config *Config) {
+				config.AuthMaxFailures = 0
+			},
+			wantMessage: "auth_max_failures must be greater than zero",
+		},
+		{
+			name: "invalid blocked port",
+			mutate: func(config *Config) {
+				config.BlockedDestinationPorts = []int{0}
+			},
+			wantMessage: "blocked_destination_ports contains invalid port",
+		},
+		{
+			name: "duplicate blocked port",
+			mutate: func(config *Config) {
+				config.BlockedDestinationPorts = []int{22, 22}
+			},
+			wantMessage: "blocked_destination_ports contains duplicate port",
+		},
+		{
 			name: "unsupported upstream scheme",
 			mutate: func(config *Config) {
 				config.UpstreamProxy = "socks5://proxy.example:1080"
@@ -361,6 +506,73 @@ func TestApplyEnvOverridesParsesLogSensitiveData(t *testing.T) {
 	}
 }
 
+func TestApplyEnvOverridesParsesResourceLimits(t *testing.T) {
+	clearProxyEnvironment(t)
+	for name, value := range map[string]string{
+		"PROXY_MAX_CONNECTIONS":            "200",
+		"PROXY_MAX_CONNECTIONS_PER_IP":     "20",
+		"PROXY_MAX_TUNNELS":                "50",
+		"PROXY_MAX_TUNNELS_PER_IP":         "5",
+		"PROXY_MAX_HEADER_BYTES":           "32768",
+		"PROXY_AUTH_MAX_FAILURES":          "7",
+		"PROXY_ALLOW_PRIVATE_DESTINATIONS": "true",
+		"PROXY_BLOCKED_DESTINATION_PORTS":  "22, 25",
+	} {
+		t.Setenv(name, value)
+	}
+	config := defaultConfig()
+
+	if err := applyEnvOverrides(&config); err != nil {
+		t.Fatalf("applyEnvOverrides() error = %v", err)
+	}
+	if config.MaxConnections != 200 || config.MaxConnectionsPerIP != 20 {
+		t.Fatalf("connection limits = %d/%d, want 200/20", config.MaxConnections, config.MaxConnectionsPerIP)
+	}
+	if config.MaxTunnels != 50 || config.MaxTunnelsPerIP != 5 {
+		t.Fatalf("tunnel limits = %d/%d, want 50/5", config.MaxTunnels, config.MaxTunnelsPerIP)
+	}
+	if config.MaxHeaderBytes != 32768 || config.AuthMaxFailures != 7 {
+		t.Fatalf("header/auth limits = %d/%d, want 32768/7", config.MaxHeaderBytes, config.AuthMaxFailures)
+	}
+	if !config.AllowPrivateDestinations {
+		t.Fatal("AllowPrivateDestinations = false, want true")
+	}
+	if want := []int{22, 25}; !reflect.DeepEqual(config.BlockedDestinationPorts, want) {
+		t.Fatalf("BlockedDestinationPorts = %v, want %v", config.BlockedDestinationPorts, want)
+	}
+}
+
+func TestParsePortList(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		want      []int
+		wantError bool
+	}{
+		{name: "ports", value: "22, 25,443", want: []int{22, 25, 443}},
+		{name: "none", value: "none"},
+		{name: "invalid", value: "22,ssh", wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parsePortList(test.value)
+			if test.wantError {
+				if err == nil {
+					t.Fatal("parsePortList() error = nil, want an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parsePortList() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("parsePortList() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestProxyAddress(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -403,6 +615,9 @@ func TestApplyEnvOverridesParsesDurations(t *testing.T) {
 		{name: "response header", envName: "PROXY_RESPONSE_HEADER_TIMEOUT", value: "12s", get: func(c Config) time.Duration { return time.Duration(c.ResponseHeaderTimeout) }, want: 12 * time.Second},
 		{name: "read header", envName: "PROXY_READ_HEADER_TIMEOUT", value: "13s", get: func(c Config) time.Duration { return time.Duration(c.ReadHeaderTimeout) }, want: 13 * time.Second},
 		{name: "idle", envName: "PROXY_IDLE_TIMEOUT", value: "3m", get: func(c Config) time.Duration { return time.Duration(c.IdleTimeout) }, want: 3 * time.Minute},
+		{name: "tunnel idle", envName: "PROXY_TUNNEL_IDLE_TIMEOUT", value: "4m", get: func(c Config) time.Duration { return time.Duration(c.TunnelIdleTimeout) }, want: 4 * time.Minute},
+		{name: "auth failure window", envName: "PROXY_AUTH_FAILURE_WINDOW", value: "5m", get: func(c Config) time.Duration { return time.Duration(c.AuthFailureWindow) }, want: 5 * time.Minute},
+		{name: "auth block", envName: "PROXY_AUTH_BLOCK_DURATION", value: "6m", get: func(c Config) time.Duration { return time.Duration(c.AuthBlockDuration) }, want: 6 * time.Minute},
 		{name: "shutdown", envName: "PROXY_SHUTDOWN_TIMEOUT", value: "14s", get: func(c Config) time.Duration { return time.Duration(c.ShutdownTimeout) }, want: 14 * time.Second},
 	}
 
@@ -432,6 +647,9 @@ func TestApplyEnvOverridesRejectsInvalidDurations(t *testing.T) {
 		{name: "response header", envName: "PROXY_RESPONSE_HEADER_TIMEOUT"},
 		{name: "read header", envName: "PROXY_READ_HEADER_TIMEOUT"},
 		{name: "idle", envName: "PROXY_IDLE_TIMEOUT"},
+		{name: "tunnel idle", envName: "PROXY_TUNNEL_IDLE_TIMEOUT"},
+		{name: "auth failure window", envName: "PROXY_AUTH_FAILURE_WINDOW"},
+		{name: "auth block", envName: "PROXY_AUTH_BLOCK_DURATION"},
 		{name: "shutdown", envName: "PROXY_SHUTDOWN_TIMEOUT"},
 	}
 
@@ -464,11 +682,22 @@ func clearProxyEnvironment(t *testing.T) {
 		"PROXY_UPSTREAM_PROXY",
 		"PROXY_NETWORK",
 		"PROXY_LOG_SENSITIVE_DATA",
+		"PROXY_MAX_CONNECTIONS",
+		"PROXY_MAX_CONNECTIONS_PER_IP",
+		"PROXY_MAX_TUNNELS",
+		"PROXY_MAX_TUNNELS_PER_IP",
+		"PROXY_MAX_HEADER_BYTES",
+		"PROXY_AUTH_MAX_FAILURES",
+		"PROXY_ALLOW_PRIVATE_DESTINATIONS",
+		"PROXY_BLOCKED_DESTINATION_PORTS",
 		"PROXY_DIAL_TIMEOUT",
 		"PROXY_TLS_HANDSHAKE_TIMEOUT",
 		"PROXY_RESPONSE_HEADER_TIMEOUT",
 		"PROXY_READ_HEADER_TIMEOUT",
 		"PROXY_IDLE_TIMEOUT",
+		"PROXY_TUNNEL_IDLE_TIMEOUT",
+		"PROXY_AUTH_FAILURE_WINDOW",
+		"PROXY_AUTH_BLOCK_DURATION",
 		"PROXY_SHUTDOWN_TIMEOUT",
 	} {
 		t.Setenv(name, "")

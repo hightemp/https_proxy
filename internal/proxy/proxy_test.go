@@ -32,6 +32,8 @@ func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, erro
 func newDirectTestProxy(t *testing.T) *Server {
 	t.Helper()
 	cfg := config.Default()
+	cfg.AllowPrivateDestinations = true
+	cfg.BlockedDestinationPorts = nil
 	proxy, err := NewServer(cfg)
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
@@ -168,6 +170,55 @@ func TestConnectRejectsInvalidTarget(t *testing.T) {
 	}
 	if want := http.StatusText(http.StatusBadRequest) + "\n"; response.Body.String() != want {
 		t.Fatalf("response body = %q, want %q", response.Body.String(), want)
+	}
+}
+
+func TestConcurrentLimiterEnforcesGlobalAndPerKeyLimits(t *testing.T) {
+	limiter := newConcurrentLimiter(2, 1)
+	releaseFirst, ok := limiter.tryAcquire("first")
+	if !ok {
+		t.Fatal("first acquisition rejected")
+	}
+	if _, ok := limiter.tryAcquire("first"); ok {
+		t.Fatal("second acquisition for the same key accepted")
+	}
+	releaseSecond, ok := limiter.tryAcquire("second")
+	if !ok {
+		t.Fatal("second key acquisition rejected")
+	}
+	if _, ok := limiter.tryAcquire("third"); ok {
+		t.Fatal("acquisition above global limit accepted")
+	}
+
+	releaseFirst()
+	releaseFirst()
+	releaseThird, ok := limiter.tryAcquire("third")
+	if !ok {
+		t.Fatal("acquisition after release rejected")
+	}
+	releaseSecond()
+	releaseThird()
+}
+
+func TestConnectRejectsTunnelLimit(t *testing.T) {
+	proxy := newDirectTestProxy(t)
+	proxy.tunnelLimiter = newConcurrentLimiter(1, 1)
+	request := httptest.NewRequest(http.MethodConnect, "http://proxy.test", nil)
+	request.Host = "example.test:443"
+	release, ok := proxy.tunnelLimiter.tryAcquire(addressHost(request.RemoteAddr))
+	if !ok {
+		t.Fatal("could not occupy tunnel limit")
+	}
+	defer release()
+	response := httptest.NewRecorder()
+
+	proxy.ServeHTTP(response, request)
+
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("response status = %d, want %d", response.Code, http.StatusTooManyRequests)
+	}
+	if response.Header().Get("Retry-After") != "1" {
+		t.Fatalf("Retry-After = %q, want %q", response.Header().Get("Retry-After"), "1")
 	}
 }
 

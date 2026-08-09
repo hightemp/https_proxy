@@ -117,11 +117,20 @@ func (c *BufferedConn) CloseWrite() error {
 }
 
 // Relay copies data in both directions until both sides finish. A transfer
-// error interrupts the opposite direction, while a clean EOF uses half-close.
-func Relay(clientWriter net.Conn, clientSource io.Reader, destination net.Conn) {
+// error interrupts the opposite direction, a clean EOF uses half-close, and
+// inactivity in both directions closes the tunnel after idleTimeout.
+func Relay(clientWriter net.Conn, clientSource io.Reader, destination net.Conn, idleTimeout time.Duration) {
+	idle := newIdleController(idleTimeout, func() {
+		slog.Debug("Tunnel idle timeout reached", "idle_timeout", idleTimeout)
+		// Closing both connections is required to interrupt the two copy loops.
+		_ = clientWriter.Close()
+		_ = destination.Close()
+	})
+	defer idle.stop()
+
 	results := make(chan error, 2)
-	go copyAndHalfClose(destination, clientSource, results)
-	go copyAndHalfClose(clientWriter, destination, results)
+	go copyAndHalfClose(destination, activityReader{Reader: clientSource, touch: idle.touch}, results)
+	go copyAndHalfClose(clientWriter, activityReader{Reader: destination, touch: idle.touch}, results)
 
 	if firstErr := <-results; firstErr != nil {
 		deadline := time.Now()
@@ -129,6 +138,74 @@ func Relay(clientWriter net.Conn, clientSource io.Reader, destination net.Conn) 
 		_ = destination.SetDeadline(deadline)
 	}
 	<-results
+}
+
+type activityReader struct {
+	io.Reader
+	touch func()
+}
+
+func (r activityReader) Read(buffer []byte) (int, error) {
+	read, err := r.Reader.Read(buffer)
+	if read > 0 {
+		r.touch()
+	}
+	return read, err
+}
+
+type idleController struct {
+	mu        sync.Mutex
+	timer     *time.Timer
+	timeout   time.Duration
+	lastTouch time.Time
+	onTimeout func()
+	stopped   bool
+}
+
+func newIdleController(timeout time.Duration, onTimeout func()) *idleController {
+	controller := &idleController{
+		timeout:   timeout,
+		lastTouch: time.Now(),
+		onTimeout: onTimeout,
+	}
+	controller.timer = time.AfterFunc(timeout, controller.expire)
+	return controller
+}
+
+func (c *idleController) touch() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.stopped {
+		c.lastTouch = time.Now()
+		c.timer.Reset(c.timeout)
+	}
+}
+
+func (c *idleController) stop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.stopped {
+		c.stopped = true
+		c.timer.Stop()
+	}
+}
+
+func (c *idleController) expire() {
+	c.mu.Lock()
+	if c.stopped {
+		c.mu.Unlock()
+		return
+	}
+	// A timer callback may already be waiting for the mutex while touch resets
+	// it. Re-check the actual last activity to avoid closing an active tunnel.
+	if remaining := c.timeout - time.Since(c.lastTouch); remaining > 0 {
+		c.timer.Reset(remaining)
+		c.mu.Unlock()
+		return
+	}
+	c.stopped = true
+	c.mu.Unlock()
+	c.onTimeout()
 }
 
 func copyAndHalfClose(destination io.Writer, source io.Reader, results chan<- error) {

@@ -74,11 +74,22 @@ Any of these override the corresponding YAML field:
 | `PROXY_UPSTREAM_PROXY` | `upstream_proxy` (URL or `direct`) |
 | `PROXY_NETWORK` | `network` (`auto` / `tcp4` / `tcp6`) |
 | `PROXY_LOG_SENSITIVE_DATA` | `log_sensitive_data` (`true` exposes full request URLs, upstream errors, and rejected credentials in logs) |
+| `PROXY_MAX_CONNECTIONS` | `max_connections` |
+| `PROXY_MAX_CONNECTIONS_PER_IP` | `max_connections_per_ip` |
+| `PROXY_MAX_TUNNELS` | `max_tunnels` |
+| `PROXY_MAX_TUNNELS_PER_IP` | `max_tunnels_per_ip` |
+| `PROXY_MAX_HEADER_BYTES` | `max_header_bytes` |
+| `PROXY_AUTH_MAX_FAILURES` | `auth_max_failures` |
+| `PROXY_ALLOW_PRIVATE_DESTINATIONS` | `allow_private_destinations` |
+| `PROXY_BLOCKED_DESTINATION_PORTS` | `blocked_destination_ports` (comma-separated ports or `none`) |
 | `PROXY_DIAL_TIMEOUT` | `dial_timeout` |
 | `PROXY_TLS_HANDSHAKE_TIMEOUT` | `tls_handshake_timeout` |
 | `PROXY_RESPONSE_HEADER_TIMEOUT` | `response_header_timeout` |
 | `PROXY_READ_HEADER_TIMEOUT` | `read_header_timeout` |
 | `PROXY_IDLE_TIMEOUT` | `idle_timeout` |
+| `PROXY_TUNNEL_IDLE_TIMEOUT` | `tunnel_idle_timeout` |
+| `PROXY_AUTH_FAILURE_WINDOW` | `auth_failure_window` |
+| `PROXY_AUTH_BLOCK_DURATION` | `auth_block_duration` |
 | `PROXY_SHUTDOWN_TIMEOUT` | `shutdown_timeout` |
 
 ### Docker Compose (HTTP + HTTPS with Let's Encrypt)
@@ -148,11 +159,22 @@ cert_path: ""
 key_path: ""
 network: auto
 log_sensitive_data: false
+max_connections: 1024
+max_connections_per_ip: 64
+max_tunnels: 256
+max_tunnels_per_ip: 16
+max_header_bytes: 65536
+auth_max_failures: 10
+allow_private_destinations: false
+blocked_destination_ports: [21, 22, 23, 25, 110, 111, 135, 137, 138, 139, 445, 1433, 2049, 2375, 2376, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017]
 dial_timeout: 10s
 tls_handshake_timeout: 10s
 response_header_timeout: 30s
 read_header_timeout: 15s
 idle_timeout: 2m
+tunnel_idle_timeout: 10m
+auth_failure_window: 1m
+auth_block_duration: 5m
 shutdown_timeout: 15s
 # upstream_proxy: http://user:pass@upstream-proxy:8080
 # upstream_proxy: direct
@@ -171,16 +193,33 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 | `upstream_proxy` | Upstream proxy URL, `direct`, or empty to use proxy environment variables |
 | `network` | Outbound address family: `auto`, `tcp4`, or `tcp6` |
 | `log_sensitive_data` | Log full request URLs, upstream errors, and rejected Basic Auth username/password; disabled by default |
+| `max_connections` | Maximum simultaneous client TCP connections |
+| `max_connections_per_ip` | Maximum simultaneous client connections per source IP |
+| `max_tunnels` | Maximum simultaneous CONNECT tunnels |
+| `max_tunnels_per_ip` | Maximum simultaneous CONNECT tunnels per source IP |
+| `max_header_bytes` | Maximum size of incoming HTTP request headers |
+| `auth_max_failures` | Failed authentication attempts per IP before temporary blocking |
+| `allow_private_destinations` | Allow loopback, private, link-local, and other non-public destinations |
+| `blocked_destination_ports` | Ports denied by destination policy; use `[]` to clear the YAML list |
 | `dial_timeout` | TCP connection timeout |
 | `tls_handshake_timeout` | Outbound TLS handshake timeout |
 | `response_header_timeout` | Upstream CONNECT/HTTP response-header timeout |
 | `read_header_timeout` | Incoming request-header timeout |
 | `idle_timeout` | Incoming keep-alive idle timeout |
+| `tunnel_idle_timeout` | Close a CONNECT tunnel after no traffic in either direction |
+| `auth_failure_window` | Window in which failed authentication attempts are counted |
+| `auth_block_duration` | How long an IP is blocked after exceeding `auth_max_failures` |
 | `shutdown_timeout` | Graceful shutdown deadline |
 
 Timeout values use Go duration syntax, for example `500ms`, `10s`, or `2m`. Unknown YAML keys and invalid values stop the proxy at startup instead of being silently ignored.
 
 By default, request URL userinfo and query parameters are removed from logs, upstream errors are reduced to their HTTP category, and rejected Basic Auth credentials are not logged. For temporary diagnostics, set `log_sensitive_data: true` or `PROXY_LOG_SENSITIVE_DATA=true`. This can expose passwords and tokens in plaintext logs; disable it immediately after debugging.
+
+### Resource limits and destination policy
+
+Connection and CONNECT limits are enforced globally and per source IP. Excess TCP connections are closed immediately; excess tunnels and rate-limited authentication attempts receive `429 Too Many Requests`. A tunnel is closed when no bytes flow in either direction for `tunnel_idle_timeout`.
+
+The default destination policy rejects loopback, private, link-local, metadata, carrier-grade NAT, and other reserved addresses. It also blocks common administration, mail, database, and cache ports. To intentionally proxy internal services, set `allow_private_destinations: true`. To clear only the blocked port list, use `blocked_destination_ports: []` in YAML or `PROXY_BLOCKED_DESTINATION_PORTS=none`.
 
 ### Outbound network
 

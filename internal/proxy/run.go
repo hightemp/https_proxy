@@ -27,12 +27,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		slog.Warn("Sensitive logging enabled; full request URLs, upstream errors, and rejected credentials may be written to logs")
 	}
 
-	server := &http.Server{
-		Addr:              cfg.ProxyAddr,
-		ReadHeaderTimeout: time.Duration(cfg.ReadHeaderTimeout),
-		IdleTimeout:       time.Duration(cfg.IdleTimeout),
-		Handler:           proxyServer,
-	}
+	server := newHTTPServer(cfg, proxyServer)
 	listener, err := makeListener(cfg, server)
 	if err != nil {
 		return err
@@ -78,6 +73,16 @@ func Run(ctx context.Context, cfg config.Config) error {
 	return errors.Join(shutdownErr, tunnelErr, serveErr)
 }
 
+func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              cfg.ProxyAddr,
+		ReadHeaderTimeout: time.Duration(cfg.ReadHeaderTimeout),
+		IdleTimeout:       time.Duration(cfg.IdleTimeout),
+		MaxHeaderBytes:    cfg.MaxHeaderBytes,
+		Handler:           handler,
+	}
+}
+
 func makeListener(cfg config.Config, server *http.Server) (net.Listener, error) {
 	var tlsConfig *tls.Config
 	if cfg.Proto == "https" {
@@ -96,6 +101,7 @@ func makeListener(cfg config.Config, server *http.Server) (net.Listener, error) 
 	if err != nil {
 		return nil, fmt.Errorf("create listener: %w", err)
 	}
+	listener = newLimitedListener(listener, cfg.MaxConnections, cfg.MaxConnectionsPerIP)
 	if tlsConfig != nil {
 		return tls.NewListener(listener, tlsConfig), nil
 	}
