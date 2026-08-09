@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"bufio"
@@ -15,22 +15,24 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hightemp/https_proxy/internal/config"
 )
 
 const testIOTimeout = 3 * time.Second
 
-func newDirectTestProxy(t *testing.T) *proxyServer {
+func newDirectTestProxy(t *testing.T) *Server {
 	t.Helper()
-	config := defaultConfig()
-	proxy, err := newProxyServer(config)
+	cfg := config.Default()
+	proxy, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("newProxyServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 	direct := func(*http.Request) (*url.URL, error) { return nil, nil }
 	proxy.proxyFunc = direct
 	proxy.httpClient.Transport.(*http.Transport).Proxy = direct
 	t.Cleanup(func() {
-		proxy.tunnels.closeAll()
+		proxy.tunnels.CloseAll()
 		proxy.httpClient.Transport.(*http.Transport).CloseIdleConnections()
 	})
 	return proxy
@@ -185,6 +187,23 @@ func TestConnectPreservesResponseAfterClientHalfClose(t *testing.T) {
 	}
 }
 
+func TestBuildConnectRequestDecodesProxyCredentials(t *testing.T) {
+	proxyURL, err := config.ParseProxyURL("https://user%40example:p%3Ass%2Fword@proxy.example")
+	if err != nil {
+		t.Fatalf("ParseProxyURL() error = %v", err)
+	}
+
+	request := buildConnectRequest("origin.example:443", proxyURL)
+	wantCredentials := base64.StdEncoding.EncodeToString([]byte("user@example:p:ss/word"))
+	wantHeader := "Proxy-Authorization: Basic " + wantCredentials + "\r\n"
+	if !strings.Contains(request, wantHeader) {
+		t.Fatalf("CONNECT request does not contain decoded credentials header %q: %q", wantHeader, request)
+	}
+	if strings.Contains(request, "%40") || strings.Contains(request, "%3A") {
+		t.Fatalf("CONNECT request contains percent-encoded credentials: %q", request)
+	}
+}
+
 func TestDialUpstreamUsesDecodedCredentialsAndPreservesBufferedData(t *testing.T) {
 	upstream := listenLocal(t)
 	upstreamResult := make(chan error, 1)
@@ -215,12 +234,12 @@ func TestDialUpstreamUsesDecodedCredentialsAndPreservesBufferedData(t *testing.T
 		upstreamResult <- err
 	}()
 
-	config := defaultConfig()
+	cfg := config.Default()
 	userinfo := url.UserPassword("user@name", "p:ss").String()
-	config.UpstreamProxy = fmt.Sprintf("http://%s@%s", userinfo, upstream.Addr())
-	proxy, err := newProxyServer(config)
+	cfg.UpstreamProxy = fmt.Sprintf("http://%s@%s", userinfo, upstream.Addr())
+	proxy, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("newProxyServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	conn, err := proxy.dialUpstream(context.Background(), "example.test:443")
@@ -264,12 +283,12 @@ func TestDialUpstreamClearsSetupDeadline(t *testing.T) {
 		upstreamResult <- err
 	}()
 
-	config := defaultConfig()
-	config.ResponseHeaderTimeout = Duration(75 * time.Millisecond)
-	config.UpstreamProxy = "http://" + upstream.Addr().String()
-	proxy, err := newProxyServer(config)
+	cfg := config.Default()
+	cfg.ResponseHeaderTimeout = config.Duration(75 * time.Millisecond)
+	cfg.UpstreamProxy = "http://" + upstream.Addr().String()
+	proxy, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("newProxyServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 	conn, err := proxy.dialUpstream(context.Background(), "example.test:443")
 	if err != nil {
@@ -299,12 +318,12 @@ func TestDialUpstreamResponseTimeout(t *testing.T) {
 		}
 	}()
 
-	config := defaultConfig()
-	config.ResponseHeaderTimeout = Duration(75 * time.Millisecond)
-	config.UpstreamProxy = "http://" + upstream.Addr().String()
-	proxy, err := newProxyServer(config)
+	cfg := config.Default()
+	cfg.ResponseHeaderTimeout = config.Duration(75 * time.Millisecond)
+	cfg.UpstreamProxy = "http://" + upstream.Addr().String()
+	proxy, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("newProxyServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	started := time.Now()
@@ -334,13 +353,13 @@ func TestDialHTTPSUpstreamHandshakeTimeout(t *testing.T) {
 		}
 	}()
 
-	config := defaultConfig()
-	config.TLSHandshakeTimeout = Duration(75 * time.Millisecond)
-	config.ResponseHeaderTimeout = Duration(time.Second)
-	config.UpstreamProxy = "https://" + upstream.Addr().String()
-	proxy, err := newProxyServer(config)
+	cfg := config.Default()
+	cfg.TLSHandshakeTimeout = config.Duration(75 * time.Millisecond)
+	cfg.ResponseHeaderTimeout = config.Duration(time.Second)
+	cfg.UpstreamProxy = "https://" + upstream.Addr().String()
+	proxy, err := NewServer(cfg)
 	if err != nil {
-		t.Fatalf("newProxyServer() error = %v", err)
+		t.Fatalf("NewServer() error = %v", err)
 	}
 
 	started := time.Now()
@@ -365,39 +384,6 @@ func TestReadConnectResponseRejectsOversizedHeaders(t *testing.T) {
 	_, err := readConnectResponse(bufio.NewReader(strings.NewReader(response)))
 	if err == nil || !strings.Contains(err.Error(), "exceed") {
 		t.Fatalf("readConnectResponse() error = %v, want header limit error", err)
-	}
-}
-
-func TestTunnelRegistryClosesTrackedConnectionsAndRejectsNew(t *testing.T) {
-	registry := newTunnelRegistry()
-	client, clientPeer := net.Pipe()
-	dest, destPeer := net.Pipe()
-	t.Cleanup(func() {
-		_ = clientPeer.Close()
-		_ = destPeer.Close()
-	})
-	tracked := &tunnel{client: client, dest: dest}
-	if !registry.track(tracked) {
-		t.Fatal("track() = false before shutdown")
-	}
-
-	registry.closeAll()
-	registry.untrack(tracked)
-	ctx, cancel := context.WithTimeout(context.Background(), testIOTimeout)
-	defer cancel()
-	if err := registry.wait(ctx); err != nil {
-		t.Fatalf("wait() error = %v", err)
-	}
-	if registry.track(&tunnel{}) {
-		t.Fatal("track() = true after shutdown")
-	}
-
-	buffer := make([]byte, 1)
-	if _, err := clientPeer.Read(buffer); err == nil {
-		t.Fatal("client peer remains open after registry shutdown")
-	}
-	if _, err := destPeer.Read(buffer); err == nil {
-		t.Fatal("destination peer remains open after registry shutdown")
 	}
 }
 
@@ -439,10 +425,10 @@ func TestTunnelRegistryShutdownClosesActiveConnect(t *testing.T) {
 	case <-time.After(testIOTimeout):
 		t.Fatal("target did not accept tunnel")
 	}
-	proxy.tunnels.closeAll()
+	proxy.tunnels.CloseAll()
 	ctx, cancel := context.WithTimeout(context.Background(), testIOTimeout)
 	defer cancel()
-	if err := proxy.tunnels.wait(ctx); err != nil {
+	if err := proxy.tunnels.Wait(ctx); err != nil {
 		t.Fatalf("wait for active tunnel shutdown: %v", err)
 	}
 	if _, err := reader.ReadByte(); err == nil {

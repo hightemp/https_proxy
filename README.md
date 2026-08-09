@@ -124,6 +124,16 @@ docker compose restart https-proxy
     make build
     ```
 
+### Project structure
+
+```text
+cmd/https_proxy/  application entry point
+internal/config/  configuration loading and validation
+internal/auth/    proxy authentication
+internal/proxy/   HTTP forwarding, upstream chaining, and server lifecycle
+internal/tunnel/  CONNECT tunnel tracking and bidirectional relay
+```
+
 ## Configuration
 
 Create a `config.yaml` file (see `config.example.yaml`):

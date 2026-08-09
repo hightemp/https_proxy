@@ -5,15 +5,15 @@ CONFIG_DIR = /etc/$(PROJECT_NAME)
 SYSTEMD_DIR = /etc/systemd/system
 DOCKER_IMAGE = hightemp/$(PROJECT_NAME)
 
-.PHONY: build run clean install uninstall install-service uninstall-service start stop restart status enable disable release docker-build docker-push docker-release
+.PHONY: build build-static run clean install uninstall uninstall-full install-service uninstall-service start stop restart status enable disable release docker-build docker-push docker-release
 
 build:
-	CGO_ENABLED=0 go build -o $(PROJECT_NAME) main.go
+	CGO_ENABLED=0 go build -o $(PROJECT_NAME) ./cmd/https_proxy
 	chmod +x $(PROJECT_NAME)
 
 build-static:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -ldflags '-extldflags "-static"' -o $(PROJECT_NAME)_static main.go
-	chmod +x $(PROJECT_NAME)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -ldflags '-extldflags "-static"' -o $(PROJECT_NAME)_static ./cmd/https_proxy
+	chmod +x $(PROJECT_NAME)_static
 
 run:
 	./$(PROJECT_NAME)

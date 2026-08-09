@@ -1,5 +1,5 @@
-https_proxy
-https_proxy_static
+/https_proxy
+/https_proxy_static
 config.yaml
 test.sh
 cert.pem

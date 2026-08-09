@@ -1,7 +1,6 @@
-package main
+package config
 
 import (
-	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -307,35 +306,18 @@ func TestProxyAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			proxyURL, err := parseProxyURL(tt.rawURL)
+			proxyURL, err := ParseProxyURL(tt.rawURL)
 			if err != nil {
-				t.Fatalf("parseProxyURL(%q) error = %v", tt.rawURL, err)
+				t.Fatalf("ParseProxyURL(%q) error = %v", tt.rawURL, err)
 			}
-			got, err := proxyAddress(proxyURL)
+			got, err := ProxyAddress(proxyURL)
 			if err != nil {
-				t.Fatalf("proxyAddress() error = %v", err)
+				t.Fatalf("ProxyAddress() error = %v", err)
 			}
 			if got != tt.want {
-				t.Fatalf("proxyAddress() = %q, want %q", got, tt.want)
+				t.Fatalf("ProxyAddress() = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestBuildConnectRequestDecodesProxyCredentials(t *testing.T) {
-	proxyURL, err := parseProxyURL("https://user%40example:p%3Ass%2Fword@proxy.example")
-	if err != nil {
-		t.Fatalf("parseProxyURL() error = %v", err)
-	}
-
-	request := buildConnectRequest("origin.example:443", proxyURL)
-	wantCredentials := base64.StdEncoding.EncodeToString([]byte("user@example:p:ss/word"))
-	wantHeader := "Proxy-Authorization: Basic " + wantCredentials + "\r\n"
-	if !strings.Contains(request, wantHeader) {
-		t.Fatalf("CONNECT request does not contain decoded credentials header %q: %q", wantHeader, request)
-	}
-	if strings.Contains(request, "%40") || strings.Contains(request, "%3A") {
-		t.Fatalf("CONNECT request contains percent-encoded credentials: %q", request)
 	}
 }
 

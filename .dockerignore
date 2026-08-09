@@ -1,5 +1,7 @@
-https_proxy
-https_proxy_static
+/https_proxy
+/https_proxy_static
+.env
+*.env
 *.pem
 config.yaml
 config.http.yaml
