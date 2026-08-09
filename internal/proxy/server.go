@@ -3,7 +3,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -85,11 +84,8 @@ func NewServer(cfg config.Config) (*Server, error) {
 	}
 	server.httpClient = &http.Client{
 		Transport: transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("too many redirects (>%d) while following %s", len(via), via[len(via)-1].URL.String())
-			}
-			return nil
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
 		},
 	}
 	return server, nil

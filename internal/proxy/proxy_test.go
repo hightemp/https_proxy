@@ -613,6 +613,72 @@ func TestHTTPForwardingRemovesDynamicHopHeaders(t *testing.T) {
 	}
 }
 
+func TestHTTPForwardingReturnsRedirectWithoutFollowing(t *testing.T) {
+	tests := []int{
+		http.StatusMovedPermanently,
+		http.StatusFound,
+		http.StatusSeeOther,
+		http.StatusTemporaryRedirect,
+		http.StatusPermanentRedirect,
+	}
+
+	for _, statusCode := range tests {
+		t.Run(http.StatusText(statusCode), func(t *testing.T) {
+			destinationHit := make(chan struct{}, 1)
+			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/destination" {
+					destinationHit <- struct{}{}
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				w.Header().Set("Location", "/destination")
+				w.WriteHeader(statusCode)
+			}))
+			t.Cleanup(origin.Close)
+
+			proxy := newDirectTestProxy(t)
+			proxyHTTP := httptest.NewServer(proxy)
+			t.Cleanup(proxyHTTP.Close)
+			proxyURL, err := url.Parse(proxyHTTP.URL)
+			if err != nil {
+				t.Fatalf("parse proxy URL: %v", err)
+			}
+			transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+			t.Cleanup(transport.CloseIdleConnections)
+			client := &http.Client{
+				Transport: transport,
+				Timeout:   testIOTimeout,
+				CheckRedirect: func(*http.Request, []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
+			}
+
+			response, err := client.Get(origin.URL + "/redirect")
+			if err != nil {
+				t.Fatalf("client.Get() error = %v", err)
+			}
+			if _, err := io.Copy(io.Discard, response.Body); err != nil {
+				t.Fatalf("read response body: %v", err)
+			}
+			if err := response.Body.Close(); err != nil {
+				t.Fatalf("close response body: %v", err)
+			}
+
+			if response.StatusCode != statusCode {
+				t.Fatalf("response status = %d, want %d", response.StatusCode, statusCode)
+			}
+			if location := response.Header.Get("Location"); location != "/destination" {
+				t.Fatalf("response Location = %q, want %q", location, "/destination")
+			}
+			select {
+			case <-destinationHit:
+				t.Fatal("proxy followed redirect instead of returning it")
+			default:
+			}
+		})
+	}
+}
+
 func TestHTTPForwardingAppendsVia(t *testing.T) {
 	originResult := make(chan error, 1)
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
