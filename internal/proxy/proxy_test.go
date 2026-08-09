@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -340,6 +341,63 @@ func TestDialUpstreamResponseTimeout(t *testing.T) {
 		_ = conn.Close()
 	case <-time.After(testIOTimeout):
 		t.Fatal("upstream did not accept connection")
+	}
+}
+
+func TestDialUpstreamStopsWaitingWhenContextIsCanceled(t *testing.T) {
+	upstream := listenLocal(t)
+	upstreamReady := make(chan net.Conn, 1)
+	upstreamError := make(chan error, 1)
+	go func() {
+		conn, err := upstream.Accept()
+		if err != nil {
+			upstreamError <- err
+			return
+		}
+		if _, err := http.ReadRequest(bufio.NewReader(conn)); err != nil {
+			_ = conn.Close()
+			upstreamError <- err
+			return
+		}
+		upstreamReady <- conn
+	}()
+
+	cfg := config.Default()
+	cfg.ResponseHeaderTimeout = config.Duration(5 * time.Second)
+	cfg.UpstreamProxy = "http://" + upstream.Addr().String()
+	proxy, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dialResult := make(chan error, 1)
+	go func() {
+		conn, err := proxy.dialUpstream(ctx, "example.test:443")
+		if conn != nil {
+			_ = conn.Close()
+		}
+		dialResult <- err
+	}()
+
+	select {
+	case conn := <-upstreamReady:
+		t.Cleanup(func() { _ = conn.Close() })
+	case err := <-upstreamError:
+		t.Fatalf("upstream: %v", err)
+	case <-time.After(testIOTimeout):
+		t.Fatal("upstream did not receive CONNECT request")
+	}
+
+	cancel()
+	select {
+	case err := <-dialResult:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("dialUpstream() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("dialUpstream() did not stop after context cancellation")
 	}
 }
 

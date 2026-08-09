@@ -133,6 +133,10 @@ func (p *Server) dialUpstream(ctx context.Context, targetHost string) (net.Conn,
 	}
 	setupCtx, cancel := context.WithTimeout(ctx, time.Duration(p.config.ResponseHeaderTimeout))
 	defer cancel()
+	stopSetupInterrupt := context.AfterFunc(setupCtx, func() {
+		_ = rawConn.SetDeadline(time.Now())
+	})
+	defer stopSetupInterrupt()
 
 	var conn net.Conn = rawConn
 	if upstreamURL.Scheme == "https" {
@@ -145,6 +149,9 @@ func (p *Server) dialUpstream(ctx context.Context, targetHost string) (net.Conn,
 		handshakeCancel()
 		if err != nil {
 			_ = rawConn.Close()
+			if cause := context.Cause(setupCtx); cause != nil {
+				err = cause
+			}
 			return nil, fmt.Errorf("TLS handshake with upstream proxy: %w", err)
 		}
 		conn = tlsConn
@@ -153,6 +160,9 @@ func (p *Server) dialUpstream(ctx context.Context, targetHost string) (net.Conn,
 	connectRequest := buildConnectRequest(targetHost, upstreamURL)
 	if err := writeAll(conn, []byte(connectRequest)); err != nil {
 		_ = conn.Close()
+		if cause := context.Cause(setupCtx); cause != nil {
+			err = cause
+		}
 		return nil, fmt.Errorf("send CONNECT to upstream: %w", err)
 	}
 
@@ -160,7 +170,18 @@ func (p *Server) dialUpstream(ctx context.Context, targetHost string) (net.Conn,
 	statusCode, err := readConnectResponse(reader)
 	if err != nil {
 		_ = conn.Close()
+		if cause := context.Cause(setupCtx); cause != nil {
+			return nil, fmt.Errorf("read CONNECT response from upstream: %w", cause)
+		}
 		return nil, err
+	}
+	if !stopSetupInterrupt() {
+		_ = conn.Close()
+		cause := context.Cause(setupCtx)
+		if cause == nil {
+			cause = context.Canceled
+		}
+		return nil, fmt.Errorf("set up upstream CONNECT: %w", cause)
 	}
 	if statusCode != http.StatusOK {
 		_ = conn.Close()
