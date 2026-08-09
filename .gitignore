@@ -1,3 +1,5 @@
+.env
+*.env
 /https_proxy
 /https_proxy_static
 config.yaml
