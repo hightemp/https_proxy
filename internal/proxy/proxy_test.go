@@ -21,6 +21,7 @@ import (
 )
 
 const testIOTimeout = 3 * time.Second
+const testViaHeader = "1.1 https_proxy"
 
 func newDirectTestProxy(t *testing.T) *Server {
 	t.Helper()
@@ -206,13 +207,55 @@ func TestBuildProxyFuncDirectIgnoresEnvironment(t *testing.T) {
 	}
 }
 
+func TestForwardedVia(t *testing.T) {
+	tests := []struct {
+		name       string
+		header     http.Header
+		protoMajor int
+		protoMinor int
+		want       string
+	}{
+		{
+			name:       "new chain",
+			protoMajor: 1,
+			protoMinor: 1,
+			want:       testViaHeader,
+		},
+		{
+			name:       "existing chain",
+			header:     http.Header{"Via": {"1.0 first-proxy", "1.1 second-proxy"}},
+			protoMajor: 2,
+			protoMinor: 0,
+			want:       "1.0 first-proxy, 1.1 second-proxy, 2.0 https_proxy",
+		},
+		{
+			name: "connection-specific Via removed",
+			header: http.Header{
+				"Connection": {"Via"},
+				"Via":        {"1.0 remove-me"},
+			},
+			protoMajor: 1,
+			protoMinor: 1,
+			want:       testViaHeader,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := forwardedVia(test.header, test.protoMajor, test.protoMinor); got != test.want {
+				t.Fatalf("forwardedVia() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestBuildConnectRequestDecodesProxyCredentials(t *testing.T) {
 	proxyURL, err := config.ParseProxyURL("https://user%40example:p%3Ass%2Fword@proxy.example")
 	if err != nil {
 		t.Fatalf("ParseProxyURL() error = %v", err)
 	}
 
-	request := buildConnectRequest("origin.example:443", proxyURL)
+	request := buildConnectRequest("origin.example:443", proxyURL, testViaHeader)
 	wantCredentials := base64.StdEncoding.EncodeToString([]byte("user@example:p:ss/word"))
 	wantHeader := "Proxy-Authorization: Basic " + wantCredentials + "\r\n"
 	if !strings.Contains(request, wantHeader) {
@@ -220,6 +263,9 @@ func TestBuildConnectRequestDecodesProxyCredentials(t *testing.T) {
 	}
 	if strings.Contains(request, "%40") || strings.Contains(request, "%3A") {
 		t.Fatalf("CONNECT request contains percent-encoded credentials: %q", request)
+	}
+	if !strings.Contains(request, "Via: "+testViaHeader+"\r\n") {
+		t.Fatalf("CONNECT request does not contain Via header: %q", request)
 	}
 }
 
@@ -249,6 +295,10 @@ func TestDialUpstreamUsesDecodedCredentialsAndPreservesBufferedData(t *testing.T
 			upstreamResult <- fmt.Errorf("Proxy-Authorization = %q, want %q", auth, expectedAuth)
 			return
 		}
+		if via := request.Header.Get("Via"); via != testViaHeader {
+			upstreamResult <- fmt.Errorf("Via = %q, want %q", via, testViaHeader)
+			return
+		}
 		_, err = io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\nX-Test: yes\r\n\r\nEARLY-UPSTREAM-DATA")
 		upstreamResult <- err
 	}()
@@ -261,7 +311,7 @@ func TestDialUpstreamUsesDecodedCredentialsAndPreservesBufferedData(t *testing.T
 		t.Fatalf("NewServer() error = %v", err)
 	}
 
-	conn, err := proxy.dialUpstream(context.Background(), "example.test:443")
+	conn, err := proxy.dialUpstream(context.Background(), "example.test:443", testViaHeader)
 	if err != nil {
 		t.Fatalf("dialUpstream() error = %v", err)
 	}
@@ -309,7 +359,7 @@ func TestDialUpstreamClearsSetupDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer() error = %v", err)
 	}
-	conn, err := proxy.dialUpstream(context.Background(), "example.test:443")
+	conn, err := proxy.dialUpstream(context.Background(), "example.test:443", testViaHeader)
 	if err != nil {
 		t.Fatalf("dialUpstream() error = %v", err)
 	}
@@ -346,7 +396,7 @@ func TestDialUpstreamResponseTimeout(t *testing.T) {
 	}
 
 	started := time.Now()
-	_, err = proxy.dialUpstream(context.Background(), "example.test:443")
+	_, err = proxy.dialUpstream(context.Background(), "example.test:443", testViaHeader)
 	elapsed := time.Since(started)
 	if err == nil {
 		t.Fatal("dialUpstream() error = nil, want timeout")
@@ -392,7 +442,7 @@ func TestDialUpstreamStopsWaitingWhenContextIsCanceled(t *testing.T) {
 	defer cancel()
 	dialResult := make(chan error, 1)
 	go func() {
-		conn, err := proxy.dialUpstream(ctx, "example.test:443")
+		conn, err := proxy.dialUpstream(ctx, "example.test:443", testViaHeader)
 		if conn != nil {
 			_ = conn.Close()
 		}
@@ -439,7 +489,7 @@ func TestDialHTTPSUpstreamHandshakeTimeout(t *testing.T) {
 	}
 
 	started := time.Now()
-	_, err = proxy.dialUpstream(context.Background(), "example.test:443")
+	_, err = proxy.dialUpstream(context.Background(), "example.test:443", testViaHeader)
 	elapsed := time.Since(started)
 	if err == nil {
 		t.Fatal("dialUpstream() error = nil, want TLS handshake timeout")
@@ -557,6 +607,116 @@ func TestHTTPForwardingRemovesDynamicHopHeaders(t *testing.T) {
 	}
 	if value := response.Header.Get("X-End-To-End"); value != "keep me" {
 		t.Fatalf("end-to-end response header = %q", value)
+	}
+	if err := <-originResult; err != nil {
+		t.Fatalf("origin: %v", err)
+	}
+}
+
+func TestHTTPForwardingAppendsVia(t *testing.T) {
+	originResult := make(chan error, 1)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := strings.Join(r.Header.Values("Via"), ", "); got != "1.0 client-proxy, 1.1 https_proxy" {
+			originResult <- fmt.Errorf("request Via = %q", got)
+			return
+		}
+		w.Header().Set("Via", "1.0 origin-proxy")
+		w.WriteHeader(http.StatusNoContent)
+		originResult <- nil
+	}))
+	t.Cleanup(origin.Close)
+
+	proxy := newDirectTestProxy(t)
+	proxyHTTP := httptest.NewServer(proxy)
+	t.Cleanup(proxyHTTP.Close)
+	proxyURL, err := url.Parse(proxyHTTP.URL)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Transport: transport, Timeout: testIOTimeout}
+
+	request, err := http.NewRequest(http.MethodGet, origin.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	request.Header.Set("Via", "1.0 client-proxy")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	defer response.Body.Close()
+
+	if err := <-originResult; err != nil {
+		t.Fatalf("origin: %v", err)
+	}
+	if got := strings.Join(response.Header.Values("Via"), ", "); got != "1.0 origin-proxy, 1.1 https_proxy" {
+		t.Fatalf("response Via = %q", got)
+	}
+}
+
+func TestHTTPForwardingPreservesTrailers(t *testing.T) {
+	originResult := make(chan error, 1)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err == nil && string(body) != "request body" {
+			err = fmt.Errorf("request body = %q", body)
+		}
+		if err == nil && r.Trailer.Get("X-Request-Checksum") != "request-complete" {
+			err = fmt.Errorf("request trailer = %q", r.Trailer.Get("X-Request-Checksum"))
+		}
+		if err == nil && r.Header.Get("Te") != "trailers" {
+			err = fmt.Errorf("request TE = %q", r.Header.Get("Te"))
+		}
+
+		w.Header().Set("Trailer", "X-Response-Checksum")
+		w.WriteHeader(http.StatusOK)
+		if _, writeErr := io.WriteString(w, "response body"); err == nil {
+			err = writeErr
+		}
+		w.Header().Set("X-Response-Checksum", "response-complete")
+		w.Header().Set(http.TrailerPrefix+"X-Late-Trailer", "late-value")
+		originResult <- err
+	}))
+	t.Cleanup(origin.Close)
+
+	proxy := newDirectTestProxy(t)
+	proxyHTTP := httptest.NewServer(proxy)
+	t.Cleanup(proxyHTTP.Close)
+	proxyURL, err := url.Parse(proxyHTTP.URL)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Transport: transport, Timeout: testIOTimeout}
+
+	request, err := http.NewRequest(http.MethodPost, origin.URL, strings.NewReader("request body"))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	request.ContentLength = -1
+	request.Header.Set("TE", "trailers")
+	request.Trailer = http.Header{"X-Request-Checksum": {"request-complete"}}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if string(body) != "response body" {
+		t.Fatalf("response body = %q", body)
+	}
+	if got := response.Trailer.Get("X-Response-Checksum"); got != "response-complete" {
+		t.Fatalf("declared response trailer = %q", got)
+	}
+	if got := response.Trailer.Get("X-Late-Trailer"); got != "late-value" {
+		t.Fatalf("late response trailer = %q", got)
 	}
 	if err := <-originResult; err != nil {
 		t.Fatalf("origin: %v", err)

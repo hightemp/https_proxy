@@ -98,7 +98,7 @@ func readLimitedLine(reader *bufio.Reader, remaining *int) (string, error) {
 	}
 }
 
-func (p *Server) dialUpstream(ctx context.Context, targetHost string) (net.Conn, error) {
+func (p *Server) dialUpstream(ctx context.Context, targetHost, via string) (net.Conn, error) {
 	if err := validateTargetAddress(targetHost); err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (p *Server) dialUpstream(ctx context.Context, targetHost string) (net.Conn,
 		conn = tlsConn
 	}
 
-	connectRequest := buildConnectRequest(targetHost, upstreamURL)
+	connectRequest := buildConnectRequest(targetHost, upstreamURL, via)
 	if err := writeAll(conn, []byte(connectRequest)); err != nil {
 		_ = conn.Close()
 		if cause := context.Cause(setupCtx); cause != nil {
@@ -211,9 +211,12 @@ func validateTargetAddress(targetHost string) error {
 	return nil
 }
 
-func buildConnectRequest(targetHost string, upstreamURL *url.URL) string {
+func buildConnectRequest(targetHost string, upstreamURL *url.URL, via string) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n", targetHost, targetHost)
+	if via != "" {
+		fmt.Fprintf(&builder, "Via: %s\r\n", via)
+	}
 	if upstreamURL.User != nil {
 		username := upstreamURL.User.Username()
 		password, _ := upstreamURL.User.Password()

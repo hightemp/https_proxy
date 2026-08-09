@@ -126,7 +126,15 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	outRequest := r.Clone(r.Context())
 	outRequest.RequestURI = ""
 	outRequest.Host = outRequest.URL.Host
+	// The incoming body populates r.Trailer when it reaches EOF. Keep the same
+	// map so the outgoing transport sees those values at that point as well.
+	outRequest.Trailer = r.Trailer
+	acceptsTrailers := headerValuesContainToken(r.Header.Values("Te"), "trailers")
 	removeHopByHopHeaders(outRequest.Header)
+	if acceptsTrailers {
+		outRequest.Header.Set("Te", "trailers")
+	}
+	appendVia(outRequest.Header, r.ProtoMajor, r.ProtoMinor)
 
 	response, err := p.httpClient.Do(outRequest)
 	if err != nil {
@@ -134,22 +142,29 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	defer response.Body.Close()
-
 	removeHopByHopHeaders(response.Header)
-	for key, values := range response.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
+	appendVia(response.Header, response.ProtoMajor, response.ProtoMinor)
+	copyHeaders(w.Header(), response.Header)
+	announcedTrailers := announceTrailers(w.Header(), response.Trailer)
 	w.WriteHeader(response.StatusCode)
 
 	buffer := bufferPool.Get().(*[]byte)
 	defer bufferPool.Put(buffer)
-	written, err := io.CopyBuffer(w, response.Body, *buffer)
-	if err != nil {
-		slog.Error("Error copying response body", "written", written, "error", err)
+	written, copyErr := io.CopyBuffer(w, response.Body, *buffer)
+	closeErr := response.Body.Close()
+	if copyErr != nil {
+		slog.Error("Error copying response body", "written", written, "error", copyErr)
 		return
+	}
+	if closeErr != nil {
+		slog.Debug("Could not close upstream response body", "error", closeErr)
+	}
+
+	if len(response.Trailer) > 0 {
+		// Force chunked framing when an unannounced trailer appeared after a
+		// short body that net/http could otherwise send with Content-Length.
+		_ = http.NewResponseController(w).Flush()
+		copyTrailers(w.Header(), response.Trailer, announcedTrailers)
 	}
 	slog.Debug("Response copied", "bytes", written, "url", r.URL.String())
 }
@@ -162,7 +177,11 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	destination, err := p.dialUpstream(r.Context(), r.Host)
+	destination, err := p.dialUpstream(
+		r.Context(),
+		r.Host,
+		forwardedVia(r.Header, r.ProtoMajor, r.ProtoMinor),
+	)
 	if err != nil {
 		slog.Error("Can't connect to host", "host", r.Host, "error", err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
