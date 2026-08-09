@@ -109,18 +109,28 @@ func (p *Server) dialUpstream(ctx context.Context, targetHost, via string) (net.
 	if err := validateTargetAddress(targetHost); err != nil {
 		return nil, err
 	}
+	approved, err := p.approveDestination(ctx, targetHost)
+	if err != nil {
+		return nil, err
+	}
+	return p.dialApprovedUpstream(ctx, approved, via)
+}
 
-	proxyRequest := &http.Request{URL: &url.URL{Scheme: "https", Host: targetHost}}
+func (p *Server) dialApprovedUpstream(
+	ctx context.Context,
+	target approvedDestination,
+	via string,
+) (net.Conn, error) {
+	proxyRequest := &http.Request{URL: &url.URL{Scheme: "https", Host: target.original}}
 	upstreamURL, err := p.proxyFunc(proxyRequest)
 	if err != nil {
 		return nil, fmt.Errorf("select upstream proxy: %w", err)
 	}
-	network, err := config.DialNetwork(p.config.Network)
-	if err != nil {
+	if _, err := config.DialNetwork(p.config.Network); err != nil {
 		return nil, err
 	}
 	if upstreamURL == nil {
-		return p.dialer.DialContext(ctx, network, targetHost)
+		return p.dialApprovedDestination(ctx, target)
 	}
 
 	upstreamURL, err = config.ParseProxyURL(upstreamURL.String())
@@ -131,9 +141,9 @@ func (p *Server) dialUpstream(ctx context.Context, targetHost, via string) (net.
 	if err != nil {
 		return nil, fmt.Errorf("invalid selected upstream proxy: %w", err)
 	}
-	slog.Debug("Connecting via upstream proxy", "upstream", upstreamURL.Redacted(), "target", targetHost)
+	slog.Debug("Connecting via upstream proxy", "upstream", upstreamURL.Redacted(), "target", target.original)
 
-	rawConn, err := p.dialer.DialContext(ctx, network, upstreamAddress)
+	rawConn, err := p.dialDestination(ctx, upstreamAddress)
 	if err != nil {
 		return nil, fmt.Errorf("dial upstream proxy %s: %w", upstreamURL.Redacted(), err)
 	}
@@ -169,7 +179,7 @@ func (p *Server) dialUpstream(ctx context.Context, targetHost, via string) (net.
 		conn = tlsConn
 	}
 
-	connectRequest := buildConnectRequest(targetHost, upstreamURL, via)
+	connectRequest := buildConnectRequest(target.addresses[0], upstreamURL, via)
 	if err := writeAll(conn, []byte(connectRequest)); err != nil {
 		_ = conn.Close()
 		if cause := context.Cause(setupCtx); cause != nil {

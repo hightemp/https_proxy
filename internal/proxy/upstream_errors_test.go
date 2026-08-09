@@ -195,6 +195,7 @@ func TestDialUpstreamReportsConnectionFailures(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			unavailableAddress := unusedTCPAddress(t)
 			cfg := config.Default()
+			cfg.AllowPrivateDestinations = true
 			test.configure(&cfg, unavailableAddress)
 			server, err := NewServer(cfg)
 			if err != nil {
@@ -245,6 +246,7 @@ func TestDialUpstreamRejectsProxyResponses(t *testing.T) {
 			}()
 
 			cfg := config.Default()
+			cfg.AllowPrivateDestinations = true
 			cfg.UpstreamProxy = "http://" + upstream.Addr().String()
 			server, err := NewServer(cfg)
 			if err != nil {

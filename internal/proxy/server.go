@@ -43,11 +43,14 @@ type Server struct {
 	authenticator  *auth.Basic
 	httpClient     *http.Client
 	proxyFunc      func(*http.Request) (*url.URL, error)
-	dialer         *net.Dialer
+	dialer         contextDialer
+	network        string
 	tunnels        *tunnel.Registry
 	tunnelLimiter  *concurrentLimiter
 	destinationACL *destinationACL
 }
+
+type approvedDestinationContextKey struct{}
 
 // NewServer validates config and creates a proxy handler.
 func NewServer(cfg config.Config) (*Server, error) {
@@ -75,6 +78,7 @@ func NewServer(cfg config.Config) (*Server, error) {
 		}),
 		proxyFunc: proxyFunc,
 		dialer:    dialer,
+		network:   network,
 		tunnels:   tunnel.NewRegistry(),
 		tunnelLimiter: newConcurrentLimiter(
 			cfg.MaxTunnels,
@@ -92,7 +96,10 @@ func NewServer(cfg config.Config) (*Server, error) {
 		ResponseHeaderTimeout: time.Duration(cfg.ResponseHeaderTimeout),
 		ExpectContinueTimeout: time.Second,
 		DialContext: func(ctx context.Context, _ string, address string) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, address)
+			if approved, ok := ctx.Value(approvedDestinationContextKey{}).(approvedDestination); ok && approved.matches(address) {
+				return server.dialApprovedDestination(ctx, approved)
+			}
+			return server.dialDestination(ctx, address)
 		},
 	}
 	server.httpClient = &http.Client{
@@ -173,7 +180,8 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	if err := p.checkDestination(r.Context(), destination); err != nil {
+	approved, err := p.approveDestination(r.Context(), destination)
+	if err != nil {
 		p.writeDestinationError(w, r, err)
 		return
 	}
@@ -181,6 +189,11 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	outRequest := r.Clone(r.Context())
 	outRequest.RequestURI = ""
 	outRequest.Host = outRequest.URL.Host
+	outRequest = outRequest.WithContext(context.WithValue(
+		outRequest.Context(),
+		approvedDestinationContextKey{},
+		approved,
+	))
 	// The incoming body populates r.Trailer when it reaches EOF. Keep the same
 	// map so the outgoing transport sees those values at that point as well.
 	outRequest.Trailer = r.Trailer
@@ -193,6 +206,10 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	response, err := p.httpClient.Do(outRequest)
 	if err != nil {
+		if errors.Is(err, errDestinationDenied) {
+			p.writeDestinationError(w, r, err)
+			return
+		}
 		slog.Error("Error forwarding request", "error", p.errorForLog(err), "url", p.requestURLForLog(r))
 		writeUpstreamError(w, err)
 		return
@@ -238,7 +255,8 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer releaseTunnel()
-	if err := p.checkDestination(r.Context(), r.Host); err != nil {
+	approved, err := p.approveDestination(r.Context(), r.Host)
+	if err != nil {
 		p.writeDestinationError(w, r, err)
 		return
 	}
@@ -250,12 +268,16 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	destination, err := p.dialUpstream(
+	destination, err := p.dialApprovedUpstream(
 		r.Context(),
-		r.Host,
+		approved,
 		forwardedVia(r.Header, r.ProtoMajor, r.ProtoMinor),
 	)
 	if err != nil {
+		if errors.Is(err, errDestinationDenied) {
+			p.writeDestinationError(w, r, err)
+			return
+		}
 		slog.Error("Can't connect to host", "host", r.Host, "error", p.errorForLog(err))
 		writeUpstreamError(w, err)
 		return
@@ -294,10 +316,22 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	tunnel.Relay(client, clientSource, destination, time.Duration(p.config.TunnelIdleTimeout))
 }
 
-func (p *Server) checkDestination(ctx context.Context, address string) error {
+func (p *Server) approveDestination(ctx context.Context, address string) (approvedDestination, error) {
 	checkContext, cancel := context.WithTimeout(ctx, time.Duration(p.config.DialTimeout))
 	defer cancel()
-	return p.destinationACL.check(checkContext, address)
+	return p.destinationACL.approve(checkContext, p.network, address)
+}
+
+func (p *Server) dialDestination(ctx context.Context, address string) (net.Conn, error) {
+	dialContext, cancel := context.WithTimeout(ctx, time.Duration(p.config.DialTimeout))
+	defer cancel()
+	return p.destinationACL.dial(dialContext, p.dialer, p.network, address)
+}
+
+func (p *Server) dialApprovedDestination(ctx context.Context, destination approvedDestination) (net.Conn, error) {
+	dialContext, cancel := context.WithTimeout(ctx, time.Duration(p.config.DialTimeout))
+	defer cancel()
+	return dialApproved(dialContext, p.dialer, p.network, destination)
 }
 
 func (p *Server) writeDestinationError(w http.ResponseWriter, r *http.Request, err error) {

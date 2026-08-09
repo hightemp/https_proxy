@@ -31,6 +31,26 @@ type netIPResolver interface {
 	LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error)
 }
 
+type contextDialer interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
+
+type approvedDestination struct {
+	original  string
+	addresses []string
+}
+
+func (d approvedDestination) matches(address string) bool {
+	originalHost, originalPort, originalErr := net.SplitHostPort(d.original)
+	addressHost, addressPort, addressErr := net.SplitHostPort(address)
+	if originalErr != nil || addressErr != nil || originalPort != addressPort {
+		return false
+	}
+	originalHost = strings.TrimSuffix(strings.ToLower(originalHost), ".")
+	addressHost = strings.TrimSuffix(strings.ToLower(addressHost), ".")
+	return originalHost == addressHost
+}
+
 type destinationACL struct {
 	allowPrivate bool
 	blockedPorts map[int]struct{}
@@ -50,42 +70,105 @@ func newDestinationACL(cfg config.Config) *destinationACL {
 }
 
 func (a *destinationACL) check(ctx context.Context, address string) error {
+	_, err := a.approve(ctx, "tcp", address)
+	return err
+}
+
+func (a *destinationACL) approve(ctx context.Context, network, address string) (approvedDestination, error) {
 	host, portText, err := net.SplitHostPort(address)
 	if err != nil || host == "" {
-		return fmt.Errorf("invalid destination %q", address)
+		return approvedDestination{}, fmt.Errorf("invalid destination %q", address)
 	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port < 1 || port > 65535 {
-		return fmt.Errorf("invalid destination port in %q", address)
+		return approvedDestination{}, fmt.Errorf("invalid destination port in %q", address)
 	}
 	if _, blocked := a.blockedPorts[port]; blocked {
-		return fmt.Errorf("%w: port %d is blocked", errDestinationDenied, port)
+		return approvedDestination{}, fmt.Errorf("%w: port %d is blocked", errDestinationDenied, port)
 	}
 	if a.allowPrivate {
-		return nil
+		return approvedDestination{original: address, addresses: []string{address}}, nil
 	}
 
 	normalizedHost := strings.TrimSuffix(strings.ToLower(host), ".")
 	if normalizedHost == "localhost" || strings.HasSuffix(normalizedHost, ".localhost") {
-		return fmt.Errorf("%w: localhost is blocked", errDestinationDenied)
+		return approvedDestination{}, fmt.Errorf("%w: localhost is blocked", errDestinationDenied)
 	}
 	if addressIP, parseErr := netip.ParseAddr(host); parseErr == nil {
-		return checkDestinationIP(addressIP)
+		if err := checkDestinationIP(addressIP); err != nil {
+			return approvedDestination{}, err
+		}
+		return approvedDestination{
+			original:  address,
+			addresses: []string{net.JoinHostPort(addressIP.Unmap().String(), portText)},
+		}, nil
 	}
 
-	addresses, err := a.resolver.LookupNetIP(ctx, "ip", host)
+	addresses, err := a.resolver.LookupNetIP(ctx, resolverNetwork(network), host)
 	if err != nil {
-		return fmt.Errorf("resolve destination %q: %w", host, err)
+		return approvedDestination{}, fmt.Errorf("resolve destination %q: %w", host, err)
 	}
 	if len(addresses) == 0 {
-		return fmt.Errorf("resolve destination %q: no addresses", host)
+		return approvedDestination{}, fmt.Errorf("resolve destination %q: no addresses", host)
 	}
+	approved := approvedDestination{original: address, addresses: make([]string, 0, len(addresses))}
+	seen := make(map[netip.Addr]struct{}, len(addresses))
 	for _, addressIP := range addresses {
+		addressIP = addressIP.Unmap()
 		if err := checkDestinationIP(addressIP); err != nil {
-			return fmt.Errorf("destination %q: %w", host, err)
+			return approvedDestination{}, fmt.Errorf("destination %q: %w", host, err)
+		}
+		if _, duplicate := seen[addressIP]; duplicate {
+			continue
+		}
+		seen[addressIP] = struct{}{}
+		approved.addresses = append(approved.addresses, net.JoinHostPort(addressIP.String(), portText))
+	}
+	return approved, nil
+}
+
+func resolverNetwork(network string) string {
+	switch network {
+	case "tcp4":
+		return "ip4"
+	case "tcp6":
+		return "ip6"
+	default:
+		return "ip"
+	}
+}
+
+func (a *destinationACL) dial(
+	ctx context.Context,
+	dialer contextDialer,
+	network string,
+	address string,
+) (net.Conn, error) {
+	approved, err := a.approve(ctx, network, address)
+	if err != nil {
+		return nil, err
+	}
+	return dialApproved(ctx, dialer, network, approved)
+}
+
+func dialApproved(
+	ctx context.Context,
+	dialer contextDialer,
+	network string,
+	destination approvedDestination,
+) (net.Conn, error) {
+	var dialErrors []error
+	for _, address := range destination.addresses {
+		connection, err := dialer.DialContext(ctx, network, address)
+		if err == nil {
+			return connection, nil
+		}
+		dialErrors = append(dialErrors, fmt.Errorf("%s: %w", address, err))
+		if ctx.Err() != nil {
+			break
 		}
 	}
-	return nil
+	return nil, fmt.Errorf("dial destination %q: %w", destination.original, errors.Join(dialErrors...))
 }
 
 func checkDestinationIP(address netip.Addr) error {

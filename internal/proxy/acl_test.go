@@ -1,8 +1,12 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -16,6 +20,12 @@ type resolverFunc func(context.Context, string, string) ([]netip.Addr, error)
 
 func (f resolverFunc) LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error) {
 	return f(ctx, network, host)
+}
+
+type dialerFunc func(context.Context, string, string) (net.Conn, error)
+
+func (f dialerFunc) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return f(ctx, network, address)
 }
 
 func TestDestinationACL(t *testing.T) {
@@ -95,5 +105,67 @@ func TestDestinationCheckUsesDialTimeout(t *testing.T) {
 
 	if response.Code != http.StatusGatewayTimeout {
 		t.Fatalf("response status = %d, want %d", response.Code, http.StatusGatewayTimeout)
+	}
+}
+
+func TestHTTPDialUsesOnlyTheAddressApprovedByACL(t *testing.T) {
+	cfg := config.Default()
+	cfg.UpstreamProxy = config.DirectUpstream
+	proxy, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	transport := proxy.httpClient.Transport.(*http.Transport)
+	t.Cleanup(transport.CloseIdleConnections)
+
+	resolverCalls := 0
+	proxy.destinationACL.resolver = resolverFunc(func(context.Context, string, string) ([]netip.Addr, error) {
+		resolverCalls++
+		if resolverCalls == 1 {
+			return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+		}
+		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+	})
+
+	upstreamResult := make(chan error, 1)
+	var dialedAddress string
+	proxy.dialer = dialerFunc(func(_ context.Context, network, address string) (net.Conn, error) {
+		if network != "tcp" {
+			return nil, fmt.Errorf("network = %q, want tcp", network)
+		}
+		dialedAddress = address
+		client, upstream := net.Pipe()
+		go func() {
+			defer func() { _ = upstream.Close() }()
+			request, err := http.ReadRequest(bufio.NewReader(upstream))
+			if err != nil {
+				upstreamResult <- err
+				return
+			}
+			if request.Host != "rebinding.example" {
+				upstreamResult <- fmt.Errorf("Host = %q, want rebinding.example", request.Host)
+				return
+			}
+			_, err = io.WriteString(upstream, "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+			upstreamResult <- err
+		}()
+		return client, nil
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "http://rebinding.example/resource", nil)
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("response status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+	if dialedAddress != "8.8.8.8:80" {
+		t.Fatalf("dialed address = %q, want approved IP", dialedAddress)
+	}
+	if resolverCalls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", resolverCalls)
+	}
+	if err := <-upstreamResult; err != nil {
+		t.Fatalf("upstream: %v", err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
@@ -486,6 +487,7 @@ func TestDialUpstreamUsesDecodedCredentialsAndPreservesBufferedData(t *testing.T
 	}()
 
 	cfg := config.Default()
+	cfg.AllowPrivateDestinations = true
 	userinfo := url.UserPassword("user@name", "p:ss").String()
 	cfg.UpstreamProxy = fmt.Sprintf("http://%s@%s", userinfo, upstream.Addr())
 	proxy, err := NewServer(cfg)
@@ -505,6 +507,56 @@ func TestDialUpstreamUsesDecodedCredentialsAndPreservesBufferedData(t *testing.T
 	if string(payload) != "EARLY-UPSTREAM-DATA" {
 		t.Fatalf("buffered upstream data = %q", payload)
 	}
+	if err := <-upstreamResult; err != nil {
+		t.Fatalf("upstream: %v", err)
+	}
+}
+
+func TestDialUpstreamConnectsToTheAddressApprovedByACL(t *testing.T) {
+	upstream := listenLocal(t)
+	upstreamResult := make(chan error, 1)
+	go func() {
+		connection, err := upstream.Accept()
+		if err != nil {
+			upstreamResult <- err
+			return
+		}
+		defer func() { _ = connection.Close() }()
+		request, err := http.ReadRequest(bufio.NewReader(connection))
+		if err != nil {
+			upstreamResult <- err
+			return
+		}
+		if request.Host != "8.8.8.8:443" {
+			upstreamResult <- fmt.Errorf("CONNECT target = %q, want approved IP", request.Host)
+			return
+		}
+		_, err = io.WriteString(connection, "HTTP/1.1 200 Connection Established\r\n\r\n")
+		upstreamResult <- err
+	}()
+
+	cfg := config.Default()
+	cfg.UpstreamProxy = "http://" + upstream.Addr().String()
+	proxy, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+	proxy.destinationACL.resolver = resolverFunc(func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
+	})
+	approved, err := proxy.approveDestination(context.Background(), "rebinding.example:443")
+	if err != nil {
+		t.Fatalf("approveDestination() error = %v", err)
+	}
+	// The upstream proxy is a loopback test listener; the final target remains
+	// the public address approved above.
+	proxy.destinationACL.allowPrivate = true
+
+	connection, err := proxy.dialApprovedUpstream(context.Background(), approved, testViaHeader)
+	if err != nil {
+		t.Fatalf("dialApprovedUpstream() error = %v", err)
+	}
+	_ = connection.Close()
 	if err := <-upstreamResult; err != nil {
 		t.Fatalf("upstream: %v", err)
 	}
@@ -535,6 +587,7 @@ func TestDialUpstreamClearsSetupDeadline(t *testing.T) {
 	}()
 
 	cfg := config.Default()
+	cfg.AllowPrivateDestinations = true
 	cfg.ResponseHeaderTimeout = config.Duration(75 * time.Millisecond)
 	cfg.UpstreamProxy = "http://" + upstream.Addr().String()
 	proxy, err := NewServer(cfg)
@@ -570,6 +623,7 @@ func TestDialUpstreamResponseTimeout(t *testing.T) {
 	}()
 
 	cfg := config.Default()
+	cfg.AllowPrivateDestinations = true
 	cfg.ResponseHeaderTimeout = config.Duration(75 * time.Millisecond)
 	cfg.UpstreamProxy = "http://" + upstream.Addr().String()
 	proxy, err := NewServer(cfg)
@@ -613,6 +667,7 @@ func TestDialUpstreamStopsWaitingWhenContextIsCanceled(t *testing.T) {
 	}()
 
 	cfg := config.Default()
+	cfg.AllowPrivateDestinations = true
 	cfg.ResponseHeaderTimeout = config.Duration(5 * time.Second)
 	cfg.UpstreamProxy = "http://" + upstream.Addr().String()
 	proxy, err := NewServer(cfg)
@@ -662,6 +717,7 @@ func TestDialHTTPSUpstreamHandshakeTimeout(t *testing.T) {
 	}()
 
 	cfg := config.Default()
+	cfg.AllowPrivateDestinations = true
 	cfg.TLSHandshakeTimeout = config.Duration(75 * time.Millisecond)
 	cfg.ResponseHeaderTimeout = config.Duration(time.Second)
 	cfg.UpstreamProxy = "https://" + upstream.Addr().String()
