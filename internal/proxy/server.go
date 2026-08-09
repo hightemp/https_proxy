@@ -300,8 +300,16 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	defer destination.Close()
-	defer client.Close()
+	defer func() {
+		if closeErr := destination.Close(); closeErr != nil {
+			slog.Debug("Could not close destination connection", "error", closeErr)
+		}
+	}()
+	defer func() {
+		if closeErr := client.Close(); closeErr != nil {
+			slog.Debug("Could not close client connection", "error", closeErr)
+		}
+	}()
 
 	if _, err := readWriter.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
 		slog.Debug("Could not write CONNECT response", "error", err)

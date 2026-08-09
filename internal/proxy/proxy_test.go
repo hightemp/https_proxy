@@ -262,7 +262,7 @@ func TestConnectPreservesBufferedClientData(t *testing.T) {
 			targetResult <- err
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		_ = conn.SetDeadline(time.Now().Add(testIOTimeout))
 
 		payload := make([]byte, len("EARLY-CLIENT-DATA"))
@@ -320,7 +320,7 @@ func TestConnectPreservesResponseAfterClientHalfClose(t *testing.T) {
 			targetResult <- err
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		_ = conn.SetDeadline(time.Now().Add(testIOTimeout))
 
 		payload, err := io.ReadAll(conn)
@@ -461,7 +461,7 @@ func TestDialUpstreamUsesDecodedCredentialsAndPreservesBufferedData(t *testing.T
 			upstreamResult <- err
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		_ = conn.SetDeadline(time.Now().Add(testIOTimeout))
 
 		request, err := http.ReadRequest(bufio.NewReader(conn))
@@ -499,7 +499,7 @@ func TestDialUpstreamUsesDecodedCredentialsAndPreservesBufferedData(t *testing.T
 	if err != nil {
 		t.Fatalf("dialUpstream() error = %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	payload := make([]byte, len("EARLY-UPSTREAM-DATA"))
 	if _, err := io.ReadFull(conn, payload); err != nil {
 		t.Fatalf("read buffered upstream data: %v", err)
@@ -571,7 +571,7 @@ func TestDialUpstreamClearsSetupDeadline(t *testing.T) {
 			upstreamResult <- err
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		reader := bufio.NewReader(conn)
 		if _, err := http.ReadRequest(reader); err != nil {
 			upstreamResult <- err
@@ -598,7 +598,7 @@ func TestDialUpstreamClearsSetupDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dialUpstream() error = %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetReadDeadline(time.Now().Add(testIOTimeout))
 	payload := make([]byte, len("late data"))
 	if _, err := io.ReadFull(conn, payload); err != nil {
@@ -761,7 +761,7 @@ func TestTunnelRegistryShutdownClosesActiveConnect(t *testing.T) {
 			targetResult <- err
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		close(targetAccepted)
 		_, err = io.Copy(io.Discard, conn)
 		targetResult <- err
@@ -839,7 +839,7 @@ func TestHTTPForwardingRemovesDynamicHopHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client.Do() error = %v", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.Header.Get("X-Response-Hop") != "" {
 		t.Fatalf("dynamic response hop header = %q", response.Header.Get("X-Response-Hop"))
 	}
@@ -950,7 +950,7 @@ func TestHTTPForwardingAppendsVia(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client.Do() error = %v", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	if err := <-originResult; err != nil {
 		t.Fatalf("origin: %v", err)
@@ -1007,7 +1007,7 @@ func TestHTTPForwardingPreservesTrailers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client.Do() error = %v", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
@@ -1066,7 +1066,7 @@ func TestHTTPForwardingPreservesCompression(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client.Get() error = %v", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 
 	if got := <-acceptEncoding; got != "" {
 		t.Fatalf("origin Accept-Encoding = %q, want empty", got)

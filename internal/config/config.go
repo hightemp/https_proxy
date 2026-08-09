@@ -106,7 +106,10 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		// The file is read-only and fully consumed by decodeConfig below.
+		_ = file.Close()
+	}()
 
 	config, err := decodeConfig(file)
 	if err != nil {

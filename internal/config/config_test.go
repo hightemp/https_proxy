@@ -202,7 +202,7 @@ func TestExampleConfigsAreValid(t *testing.T) {
 			if err != nil {
 				t.Fatalf("open %s: %v", path, err)
 			}
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 
 			cfg, err := decodeConfig(file)
 			if err != nil {

@@ -160,7 +160,7 @@ func (p *Server) dialApprovedUpstream(
 	})
 	defer stopSetupInterrupt()
 
-	var conn net.Conn = rawConn
+	conn := net.Conn(rawConn)
 	if upstreamURL.Scheme == "https" {
 		tlsConn := tls.Client(rawConn, &tls.Config{
 			ServerName: upstreamURL.Hostname(),
