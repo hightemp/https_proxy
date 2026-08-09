@@ -13,3 +13,6 @@ Makefile
 test.sh
 generate_certs.sh
 packaging
+dist/
+.serena/
+PROJECT_REVIEW.md
