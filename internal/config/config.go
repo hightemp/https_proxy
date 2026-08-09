@@ -49,6 +49,7 @@ type Config struct {
 	KeyPath               string   `yaml:"key_path"`
 	UpstreamProxy         string   `yaml:"upstream_proxy"`
 	Network               string   `yaml:"network"`
+	LogSensitiveData      bool     `yaml:"log_sensitive_data"`
 	DialTimeout           Duration `yaml:"dial_timeout"`
 	TLSHandshakeTimeout   Duration `yaml:"tls_handshake_timeout"`
 	ResponseHeaderTimeout Duration `yaml:"response_header_timeout"`
@@ -120,6 +121,7 @@ func decodeConfig(r io.Reader) (Config, error) {
 //
 //	PROXY_ADDR, PROXY_USERNAME, PROXY_PASSWORD, PROXY_PROTO,
 //	PROXY_CERT_PATH, PROXY_KEY_PATH, PROXY_UPSTREAM_PROXY, PROXY_NETWORK,
+//	PROXY_LOG_SENSITIVE_DATA,
 //	PROXY_DIAL_TIMEOUT, PROXY_TLS_HANDSHAKE_TIMEOUT,
 //	PROXY_RESPONSE_HEADER_TIMEOUT, PROXY_READ_HEADER_TIMEOUT,
 //	PROXY_IDLE_TIMEOUT, PROXY_SHUTDOWN_TIMEOUT.
@@ -147,6 +149,13 @@ func applyEnvOverrides(c *Config) error {
 	}
 	if v := os.Getenv("PROXY_NETWORK"); v != "" {
 		c.Network = v
+	}
+	if v := os.Getenv("PROXY_LOG_SENSITIVE_DATA"); v != "" {
+		logSensitiveData, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("parse PROXY_LOG_SENSITIVE_DATA: %w", err)
+		}
+		c.LogSensitiveData = logSensitiveData
 	}
 
 	durationOverrides := []struct {

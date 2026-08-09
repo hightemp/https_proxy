@@ -24,10 +24,11 @@ func TestDecodeConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "duration overrides",
+			name: "configuration overrides",
 			yaml: strings.Join([]string{
 				"proxy_addr: 0.0.0.0:3128",
 				"network: tcp4",
+				"log_sensitive_data: true",
 				"dial_timeout: 250ms",
 				"tls_handshake_timeout: 3s",
 				"response_header_timeout: 4s",
@@ -42,6 +43,9 @@ func TestDecodeConfig(t *testing.T) {
 				}
 				if got.Network != "tcp4" {
 					t.Errorf("Network = %q, want %q", got.Network, "tcp4")
+				}
+				if !got.LogSensitiveData {
+					t.Error("LogSensitiveData = false, want true")
 				}
 
 				wantDurations := map[string]time.Duration{
@@ -321,6 +325,42 @@ func TestApplyEnvOverridesSetsDirectUpstream(t *testing.T) {
 	}
 }
 
+func TestApplyEnvOverridesParsesLogSensitiveData(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		want      bool
+		wantError bool
+	}{
+		{name: "enabled", value: "true", want: true},
+		{name: "disabled", value: "false", want: false},
+		{name: "invalid", value: "sometimes", wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clearProxyEnvironment(t)
+			t.Setenv("PROXY_LOG_SENSITIVE_DATA", test.value)
+			config := defaultConfig()
+			config.LogSensitiveData = !test.want
+
+			err := applyEnvOverrides(&config)
+			if test.wantError {
+				if err == nil || !strings.Contains(err.Error(), "PROXY_LOG_SENSITIVE_DATA") {
+					t.Fatalf("applyEnvOverrides() error = %v, want boolean parse error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("applyEnvOverrides() error = %v", err)
+			}
+			if config.LogSensitiveData != test.want {
+				t.Fatalf("LogSensitiveData = %t, want %t", config.LogSensitiveData, test.want)
+			}
+		})
+	}
+}
+
 func TestProxyAddress(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -423,6 +463,7 @@ func clearProxyEnvironment(t *testing.T) {
 		"PROXY_KEY_PATH",
 		"PROXY_UPSTREAM_PROXY",
 		"PROXY_NETWORK",
+		"PROXY_LOG_SENSITIVE_DATA",
 		"PROXY_DIAL_TIMEOUT",
 		"PROXY_TLS_HANDSHAKE_TIMEOUT",
 		"PROXY_RESPONSE_HEADER_TIMEOUT",

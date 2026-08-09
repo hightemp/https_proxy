@@ -23,6 +23,9 @@ func Run(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
+	if cfg.LogSensitiveData {
+		slog.Warn("Sensitive logging enabled; full request URLs, upstream errors, and rejected credentials may be written to logs")
+	}
 
 	server := &http.Server{
 		Addr:              cfg.ProxyAddr,

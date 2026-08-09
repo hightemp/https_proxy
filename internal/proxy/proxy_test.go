@@ -23,6 +23,12 @@ import (
 const testIOTimeout = 3 * time.Second
 const testViaHeader = "1.1 https_proxy"
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
 func newDirectTestProxy(t *testing.T) *Server {
 	t.Helper()
 	cfg := config.Default()
@@ -32,12 +38,137 @@ func newDirectTestProxy(t *testing.T) *Server {
 	}
 	direct := func(*http.Request) (*url.URL, error) { return nil, nil }
 	proxy.proxyFunc = direct
-	proxy.httpClient.Transport.(*http.Transport).Proxy = direct
+	transport := proxy.httpClient.Transport.(*http.Transport)
+	transport.Proxy = direct
 	t.Cleanup(func() {
 		proxy.tunnels.CloseAll()
-		proxy.httpClient.Transport.(*http.Transport).CloseIdleConnections()
+		transport.CloseIdleConnections()
 	})
 	return proxy
+}
+
+func TestRequestURLForLog(t *testing.T) {
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"http://attempted-user:wrong-password@example.test/private?token=secret",
+		nil,
+	)
+	tests := []struct {
+		name      string
+		sensitive bool
+		want      string
+	}{
+		{name: "redacted by default", want: "http://example.test/private"},
+		{name: "explicitly enabled", sensitive: true, want: request.URL.String()},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := &Server{config: config.Config{LogSensitiveData: test.sensitive}}
+			if got := server.requestURLForLog(request); got != test.want {
+				t.Fatalf("requestURLForLog() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestErrorForLog(t *testing.T) {
+	secretError := errors.New("secret upstream failure")
+	tests := []struct {
+		name      string
+		sensitive bool
+		want      string
+	}{
+		{name: "redacted by default", want: http.StatusText(http.StatusBadGateway)},
+		{name: "explicitly enabled", sensitive: true, want: secretError.Error()},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := &Server{config: config.Config{LogSensitiveData: test.sensitive}}
+			if got := fmt.Sprint(server.errorForLog(secretError)); got != test.want {
+				t.Fatalf("errorForLog() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestUpstreamErrorStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "generic error", err: errors.New("connection failed"), want: http.StatusBadGateway},
+		{name: "deadline", err: context.DeadlineExceeded, want: http.StatusGatewayTimeout},
+		{name: "wrapped deadline", err: fmt.Errorf("wait for upstream: %w", context.DeadlineExceeded), want: http.StatusGatewayTimeout},
+		{name: "network timeout", err: &net.DNSError{IsTimeout: true}, want: http.StatusGatewayTimeout},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := upstreamErrorStatus(test.err); got != test.want {
+				t.Fatalf("upstreamErrorStatus() = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHTTPForwardingReturnsNeutralUpstreamErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "bad gateway", err: errors.New("secret upstream failure"), want: http.StatusBadGateway},
+		{name: "gateway timeout", err: context.DeadlineExceeded, want: http.StatusGatewayTimeout},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			proxy := newDirectTestProxy(t)
+			proxy.httpClient.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return nil, test.err
+			})
+			request := httptest.NewRequest(
+				http.MethodGet,
+				"http://attempted-user:wrong-password@example.test/private?token=secret",
+				nil,
+			)
+			response := httptest.NewRecorder()
+
+			proxy.ServeHTTP(response, request)
+
+			if response.Code != test.want {
+				t.Fatalf("response status = %d, want %d", response.Code, test.want)
+			}
+			wantBody := http.StatusText(test.want) + "\n"
+			if response.Body.String() != wantBody {
+				t.Fatalf("response body = %q, want %q", response.Body.String(), wantBody)
+			}
+			for _, secret := range []string{"secret upstream failure", "wrong-password", "token=secret"} {
+				if strings.Contains(response.Body.String(), secret) {
+					t.Fatalf("response body contains sensitive value %q", secret)
+				}
+			}
+		})
+	}
+}
+
+func TestConnectRejectsInvalidTarget(t *testing.T) {
+	proxy := newDirectTestProxy(t)
+	request := httptest.NewRequest(http.MethodConnect, "http://proxy.test", nil)
+	request.Host = "missing-port"
+	response := httptest.NewRecorder()
+
+	proxy.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("response status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+	if want := http.StatusText(http.StatusBadRequest) + "\n"; response.Body.String() != want {
+		t.Fatalf("response body = %q, want %q", response.Body.String(), want)
+	}
 }
 
 func listenLocal(t *testing.T) net.Listener {

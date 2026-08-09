@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"bytes"
 	"encoding/base64"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -34,7 +37,7 @@ func TestBasicAuthenticate(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			authenticator := NewBasic(test.username, test.password)
+			authenticator := NewBasic(test.username, test.password, false)
 			request := httptest.NewRequest(http.MethodGet, "http://example.test", nil)
 			if test.header != "" {
 				request.Header.Set("Proxy-Authorization", test.header)
@@ -56,6 +59,41 @@ func TestBasicAuthenticate(t *testing.T) {
 			}
 			if !test.wantChallenge && challenge != "" {
 				t.Fatalf("Proxy-Authenticate header = %q, want empty", challenge)
+			}
+		})
+	}
+}
+
+func TestBasicAuthenticateSensitiveLogging(t *testing.T) {
+	tests := []struct {
+		name      string
+		sensitive bool
+		wantData  bool
+	}{
+		{name: "redacted by default"},
+		{name: "explicitly enabled", sensitive: true, wantData: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previousLogger := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			defer slog.SetDefault(previousLogger)
+
+			authenticator := NewBasic("expected-user", "correct-password", test.sensitive)
+			request := httptest.NewRequest(http.MethodGet, "http://example.test", nil)
+			credentials := base64.StdEncoding.EncodeToString([]byte("attempted-user:wrong-password"))
+			request.Header.Set("Proxy-Authorization", "Basic "+credentials)
+
+			if authenticator.Authenticate(httptest.NewRecorder(), request) {
+				t.Fatal("Authenticate() = true, want false")
+			}
+			for _, sensitiveValue := range []string{"attempted-user", "wrong-password"} {
+				containsData := strings.Contains(logs.String(), sensitiveValue)
+				if containsData != test.wantData {
+					t.Fatalf("log contains %q = %t, want %t; log: %s", sensitiveValue, containsData, test.wantData, logs.String())
+				}
 			}
 		})
 	}

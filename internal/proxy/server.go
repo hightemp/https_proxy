@@ -3,6 +3,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -64,7 +65,7 @@ func NewServer(cfg config.Config) (*Server, error) {
 
 	server := &Server{
 		config:        cfg,
-		authenticator: auth.NewBasic(cfg.Username, cfg.Password),
+		authenticator: auth.NewBasic(cfg.Username, cfg.Password, cfg.LogSensitiveData),
 		proxyFunc:     proxyFunc,
 		dialer:        dialer,
 		tunnels:       tunnel.NewRegistry(),
@@ -93,7 +94,7 @@ func NewServer(cfg config.Config) (*Server, error) {
 
 // ServeHTTP authenticates and dispatches proxy requests.
 func (p *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Received request", "method", r.Method, "url", r.URL.String())
+	slog.Info("Received request", "method", r.Method, "url", p.requestURLForLog(r))
 	if !p.authenticator.Authenticate(w, r) {
 		return
 	}
@@ -103,6 +104,41 @@ func (p *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		p.handleHTTP(w, r)
 	}
+}
+
+func (p *Server) requestURLForLog(r *http.Request) string {
+	if p.config.LogSensitiveData {
+		return r.URL.String()
+	}
+
+	redacted := *r.URL
+	redacted.User = nil
+	redacted.RawQuery = ""
+	redacted.ForceQuery = false
+	redacted.Fragment = ""
+	redacted.RawFragment = ""
+	redacted.Opaque = ""
+	return redacted.String()
+}
+
+func (p *Server) errorForLog(err error) any {
+	if p.config.LogSensitiveData {
+		return err
+	}
+	return http.StatusText(upstreamErrorStatus(err))
+}
+
+func upstreamErrorStatus(err error) int {
+	var networkError net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &networkError) && networkError.Timeout() {
+		return http.StatusGatewayTimeout
+	}
+	return http.StatusBadGateway
+}
+
+func writeUpstreamError(w http.ResponseWriter, err error) {
+	statusCode := upstreamErrorStatus(err)
+	http.Error(w, http.StatusText(statusCode), statusCode)
 }
 
 func removeHopByHopHeaders(header http.Header) {
@@ -134,8 +170,8 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	response, err := p.httpClient.Do(outRequest)
 	if err != nil {
-		slog.Error("Error forwarding request", "error", err, "url", r.URL.String())
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		slog.Error("Error forwarding request", "error", p.errorForLog(err), "url", p.requestURLForLog(r))
+		writeUpstreamError(w, err)
 		return
 	}
 	removeHopByHopHeaders(response.Header)
@@ -162,10 +198,16 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = http.NewResponseController(w).Flush()
 		copyTrailers(w.Header(), response.Trailer, announcedTrailers)
 	}
-	slog.Debug("Response copied", "bytes", written, "url", r.URL.String())
+	slog.Debug("Response copied", "bytes", written, "url", p.requestURLForLog(r))
 }
 
 func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
+	if err := validateTargetAddress(r.Host); err != nil {
+		slog.Warn("Invalid CONNECT target", "host", r.Host)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		slog.Error("Hijacking not supported")
@@ -179,8 +221,8 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		forwardedVia(r.Header, r.ProtoMajor, r.ProtoMinor),
 	)
 	if err != nil {
-		slog.Error("Can't connect to host", "host", r.Host, "error", err)
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		slog.Error("Can't connect to host", "host", r.Host, "error", p.errorForLog(err))
+		writeUpstreamError(w, err)
 		return
 	}
 

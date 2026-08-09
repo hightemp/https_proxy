@@ -12,18 +12,21 @@ import (
 
 // Basic authenticates proxy requests against one configured credential pair.
 type Basic struct {
-	enabled      bool
-	usernameHash [sha256.Size]byte
-	passwordHash [sha256.Size]byte
+	enabled          bool
+	logSensitiveData bool
+	usernameHash     [sha256.Size]byte
+	passwordHash     [sha256.Size]byte
 }
 
 // NewBasic creates a Basic authenticator. Authentication is disabled when both
-// username and password are empty.
-func NewBasic(username, password string) *Basic {
+// username and password are empty. Sensitive logging includes rejected
+// credentials and should only be enabled temporarily for diagnostics.
+func NewBasic(username, password string, logSensitiveData bool) *Basic {
 	return &Basic{
-		enabled:      username != "" || password != "",
-		usernameHash: sha256.Sum256([]byte(username)),
-		passwordHash: sha256.Sum256([]byte(password)),
+		enabled:          username != "" || password != "",
+		logSensitiveData: logSensitiveData,
+		usernameHash:     sha256.Sum256([]byte(username)),
+		passwordHash:     sha256.Sum256([]byte(password)),
 	}
 }
 
@@ -66,7 +69,11 @@ func (a *Basic) Authenticate(w http.ResponseWriter, r *http.Request) bool {
 	usernameMatch := subtle.ConstantTimeCompare(usernameHash[:], a.usernameHash[:])
 	passwordMatch := subtle.ConstantTimeCompare(passwordHash[:], a.passwordHash[:])
 	if usernameMatch&passwordMatch != 1 {
-		slog.Warn("Invalid credentials", "user", pair[0], "remote", r.RemoteAddr)
+		if a.logSensitiveData {
+			slog.Warn("Invalid credentials", "username", pair[0], "password", pair[1], "remote", r.RemoteAddr)
+		} else {
+			slog.Warn("Invalid credentials", "remote", r.RemoteAddr)
+		}
 		writeRequired(w)
 		return false
 	}

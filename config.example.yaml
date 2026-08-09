@@ -5,6 +5,7 @@ proto: http
 cert_path: ./cert.pem
 key_path: ./key.pem
 network: auto
+log_sensitive_data: false
 dial_timeout: 10s
 tls_handshake_timeout: 10s
 response_header_timeout: 30s

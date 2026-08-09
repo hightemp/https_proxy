@@ -13,6 +13,7 @@ services:
       PROXY_PASSWORD: ${PROXY_PASSWORD:-}
       PROXY_UPSTREAM_PROXY: ${PROXY_UPSTREAM_PROXY:-}
       PROXY_NETWORK: ${PROXY_NETWORK:-auto}
+      PROXY_LOG_SENSITIVE_DATA: "${PROXY_LOG_SENSITIVE_DATA:-false}"
 
   # HTTPS proxy with Let's Encrypt certificates (read from shared volume)
   https-proxy:
@@ -30,6 +31,7 @@ services:
       PROXY_KEY_PATH: /etc/letsencrypt/live/${DOMAIN}/privkey.pem
       PROXY_UPSTREAM_PROXY: ${PROXY_UPSTREAM_PROXY:-}
       PROXY_NETWORK: ${PROXY_NETWORK:-auto}
+      PROXY_LOG_SENSITIVE_DATA: "${PROXY_LOG_SENSITIVE_DATA:-false}"
     volumes:
       - letsencrypt:/etc/letsencrypt:ro
     depends_on:

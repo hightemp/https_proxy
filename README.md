@@ -73,6 +73,7 @@ Any of these override the corresponding YAML field:
 | `PROXY_KEY_PATH` | `key_path` |
 | `PROXY_UPSTREAM_PROXY` | `upstream_proxy` (URL or `direct`) |
 | `PROXY_NETWORK` | `network` (`auto` / `tcp4` / `tcp6`) |
+| `PROXY_LOG_SENSITIVE_DATA` | `log_sensitive_data` (`true` exposes full request URLs, upstream errors, and rejected credentials in logs) |
 | `PROXY_DIAL_TIMEOUT` | `dial_timeout` |
 | `PROXY_TLS_HANDSHAKE_TIMEOUT` | `tls_handshake_timeout` |
 | `PROXY_RESPONSE_HEADER_TIMEOUT` | `response_header_timeout` |
@@ -146,6 +147,7 @@ proto: http
 cert_path: ""
 key_path: ""
 network: auto
+log_sensitive_data: false
 dial_timeout: 10s
 tls_handshake_timeout: 10s
 response_header_timeout: 30s
@@ -168,6 +170,7 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 | `key_path` | Path to TLS private key (for `https` mode) |
 | `upstream_proxy` | Upstream proxy URL, `direct`, or empty to use proxy environment variables |
 | `network` | Outbound address family: `auto`, `tcp4`, or `tcp6` |
+| `log_sensitive_data` | Log full request URLs, upstream errors, and rejected Basic Auth username/password; disabled by default |
 | `dial_timeout` | TCP connection timeout |
 | `tls_handshake_timeout` | Outbound TLS handshake timeout |
 | `response_header_timeout` | Upstream CONNECT/HTTP response-header timeout |
@@ -176,6 +179,8 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 | `shutdown_timeout` | Graceful shutdown deadline |
 
 Timeout values use Go duration syntax, for example `500ms`, `10s`, or `2m`. Unknown YAML keys and invalid values stop the proxy at startup instead of being silently ignored.
+
+By default, request URL userinfo and query parameters are removed from logs, upstream errors are reduced to their HTTP category, and rejected Basic Auth credentials are not logged. For temporary diagnostics, set `log_sensitive_data: true` or `PROXY_LOG_SENSITIVE_DATA=true`. This can expose passwords and tokens in plaintext logs; disable it immediately after debugging.
 
 ### Outbound network
 
