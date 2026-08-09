@@ -263,6 +263,8 @@ Generate self-signed certificates:
 bash generate_certs.sh
 ```
 
+The generated certificate includes Subject Alternative Names for `localhost`, `127.0.0.1`, and `::1`, which are required by modern TLS clients. Trust `cert.pem` locally before using it; the certificate is self-signed.
+
 Or use Let's Encrypt:
 
 ```bash
