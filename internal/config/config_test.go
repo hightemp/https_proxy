@@ -118,11 +118,12 @@ func TestDecodeConfigRejectsInvalidDocuments(t *testing.T) {
 
 func TestValidateConfig(t *testing.T) {
 	tests := []struct {
-		name        string
-		mutate      func(*Config)
-		wantMessage string
-		wantProto   string
-		wantNetwork string
+		name         string
+		mutate       func(*Config)
+		wantMessage  string
+		wantProto    string
+		wantNetwork  string
+		wantUpstream string
 	}{
 		{
 			name: "normalizes protocol and network",
@@ -134,6 +135,15 @@ func TestValidateConfig(t *testing.T) {
 			},
 			wantProto:   "https",
 			wantNetwork: "tcp4",
+		},
+		{
+			name: "normalizes direct upstream mode",
+			mutate: func(config *Config) {
+				config.UpstreamProxy = " DiReCt "
+			},
+			wantProto:    "http",
+			wantNetwork:  "auto",
+			wantUpstream: DirectUpstream,
 		},
 		{
 			name: "invalid protocol",
@@ -279,6 +289,9 @@ func TestValidateConfig(t *testing.T) {
 				if config.Network != tt.wantNetwork {
 					t.Errorf("Network = %q, want %q", config.Network, tt.wantNetwork)
 				}
+				if tt.wantUpstream != "" && config.UpstreamProxy != tt.wantUpstream {
+					t.Errorf("UpstreamProxy = %q, want %q", config.UpstreamProxy, tt.wantUpstream)
+				}
 				return
 			}
 
@@ -289,6 +302,22 @@ func TestValidateConfig(t *testing.T) {
 				t.Fatalf("validateConfig() error = %q, want it to contain %q", err, tt.wantMessage)
 			}
 		})
+	}
+}
+
+func TestApplyEnvOverridesSetsDirectUpstream(t *testing.T) {
+	clearProxyEnvironment(t)
+	t.Setenv("PROXY_UPSTREAM_PROXY", DirectUpstream)
+	config := defaultConfig()
+
+	if err := applyEnvOverrides(&config); err != nil {
+		t.Fatalf("applyEnvOverrides() error = %v", err)
+	}
+	if err := validateConfig(&config); err != nil {
+		t.Fatalf("validateConfig() error = %v", err)
+	}
+	if config.UpstreamProxy != DirectUpstream {
+		t.Fatalf("UpstreamProxy = %q, want %q", config.UpstreamProxy, DirectUpstream)
 	}
 }
 

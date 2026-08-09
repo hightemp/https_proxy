@@ -188,6 +188,24 @@ func TestConnectPreservesResponseAfterClientHalfClose(t *testing.T) {
 	}
 }
 
+func TestBuildProxyFuncDirectIgnoresEnvironment(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://proxy.invalid:8080")
+	t.Setenv("HTTPS_PROXY", "http://proxy.invalid:8443")
+	proxyFunc, err := buildProxyFunc(config.DirectUpstream)
+	if err != nil {
+		t.Fatalf("buildProxyFunc() error = %v", err)
+	}
+
+	request := &http.Request{URL: &url.URL{Scheme: "https", Host: "example.test:443"}}
+	upstream, err := proxyFunc(request)
+	if err != nil {
+		t.Fatalf("proxyFunc() error = %v", err)
+	}
+	if upstream != nil {
+		t.Fatalf("proxyFunc() = %s, want direct connection", upstream)
+	}
+}
+
 func TestBuildConnectRequestDecodesProxyCredentials(t *testing.T) {
 	proxyURL, err := config.ParseProxyURL("https://user%40example:p%3Ass%2Fword@proxy.example")
 	if err != nil {

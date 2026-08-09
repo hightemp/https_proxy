@@ -15,6 +15,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DirectUpstream disables use of explicit and environment proxy servers.
+const DirectUpstream = "direct"
+
 // Duration is a time.Duration that accepts Go duration strings in YAML.
 type Duration time.Duration
 
@@ -211,7 +214,9 @@ func validateConfig(config *Config) error {
 		}
 	}
 
-	if config.UpstreamProxy != "" {
+	if strings.EqualFold(strings.TrimSpace(config.UpstreamProxy), DirectUpstream) {
+		config.UpstreamProxy = DirectUpstream
+	} else if config.UpstreamProxy != "" {
 		if _, err := ParseProxyURL(config.UpstreamProxy); err != nil {
 			return fmt.Errorf("invalid upstream_proxy: %w", err)
 		}

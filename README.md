@@ -71,7 +71,7 @@ Any of these override the corresponding YAML field:
 | `PROXY_PROTO` | `proto` (`http` / `https`) |
 | `PROXY_CERT_PATH` | `cert_path` |
 | `PROXY_KEY_PATH` | `key_path` |
-| `PROXY_UPSTREAM_PROXY` | `upstream_proxy` |
+| `PROXY_UPSTREAM_PROXY` | `upstream_proxy` (URL or `direct`) |
 | `PROXY_NETWORK` | `network` (`auto` / `tcp4` / `tcp6`) |
 | `PROXY_DIAL_TIMEOUT` | `dial_timeout` |
 | `PROXY_TLS_HANDSHAKE_TIMEOUT` | `tls_handshake_timeout` |
@@ -153,6 +153,7 @@ read_header_timeout: 15s
 idle_timeout: 2m
 shutdown_timeout: 15s
 # upstream_proxy: http://user:pass@upstream-proxy:8080
+# upstream_proxy: direct
 ```
 
 The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when the proxy must accept remote connections, and configure authentication before exposing it.
@@ -165,7 +166,7 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 | `proto` | `http` or `https` |
 | `cert_path` | Path to TLS certificate (for `https` mode) |
 | `key_path` | Path to TLS private key (for `https` mode) |
-| `upstream_proxy` | Upstream proxy URL for chaining (optional) |
+| `upstream_proxy` | Upstream proxy URL, `direct`, or empty to use proxy environment variables |
 | `network` | Outbound address family: `auto`, `tcp4`, or `tcp6` |
 | `dial_timeout` | TCP connection timeout |
 | `tls_handshake_timeout` | Outbound TLS handshake timeout |
@@ -201,6 +202,12 @@ upstream_proxy: https://user:pass@upstream-proxy:8443
 ```
 
 If `upstream_proxy` is not set in the config, the proxy falls back to standard environment variables (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`).
+
+To force direct connections and ignore those environment variables, use the explicit `direct` mode:
+
+```yaml
+upstream_proxy: direct
+```
 
 An explicitly configured upstream URL is validated at startup and never silently falls back to a direct connection. Percent-encode reserved characters in credentials, for example `user%40example` for `user@example` and `p%3Ass` for `p:ss`.
 

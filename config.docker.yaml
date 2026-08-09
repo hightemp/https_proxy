@@ -12,3 +12,4 @@ read_header_timeout: 15s
 idle_timeout: 2m
 shutdown_timeout: 15s
 # upstream_proxy: https://user:pass@upstream-proxy:8080
+# upstream_proxy: direct  # Ignore HTTP_PROXY, HTTPS_PROXY, and NO_PROXY.
