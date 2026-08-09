@@ -78,6 +78,8 @@ Any of these override the corresponding YAML field:
 | `PROXY_MAX_CONNECTIONS_PER_IP` | `max_connections_per_ip` |
 | `PROXY_MAX_TUNNELS` | `max_tunnels` |
 | `PROXY_MAX_TUNNELS_PER_IP` | `max_tunnels_per_ip` |
+| `PROXY_MAX_IDLE_CONNS` | `max_idle_conns` |
+| `PROXY_MAX_IDLE_CONNS_PER_HOST` | `max_idle_conns_per_host` |
 | `PROXY_MAX_HEADER_BYTES` | `max_header_bytes` |
 | `PROXY_AUTH_MAX_FAILURES` | `auth_max_failures` |
 | `PROXY_ALLOW_PRIVATE_DESTINATIONS` | `allow_private_destinations` |
@@ -86,6 +88,7 @@ Any of these override the corresponding YAML field:
 | `PROXY_TLS_HANDSHAKE_TIMEOUT` | `tls_handshake_timeout` |
 | `PROXY_TLS_RELOAD_INTERVAL` | `tls_reload_interval` |
 | `PROXY_RESPONSE_HEADER_TIMEOUT` | `response_header_timeout` |
+| `PROXY_IDLE_CONN_TIMEOUT` | `idle_conn_timeout` |
 | `PROXY_READ_HEADER_TIMEOUT` | `read_header_timeout` |
 | `PROXY_IDLE_TIMEOUT` | `idle_timeout` |
 | `PROXY_TUNNEL_IDLE_TIMEOUT` | `tunnel_idle_timeout` |
@@ -160,6 +163,8 @@ max_connections: 1024
 max_connections_per_ip: 128
 max_tunnels: 256
 max_tunnels_per_ip: 128
+max_idle_conns: 100
+max_idle_conns_per_host: 10
 max_header_bytes: 65536
 auth_max_failures: 10
 allow_private_destinations: false
@@ -168,6 +173,7 @@ dial_timeout: 10s
 tls_handshake_timeout: 10s
 tls_reload_interval: 1m
 response_header_timeout: 30s
+idle_conn_timeout: 90s
 read_header_timeout: 15s
 idle_timeout: 2m
 tunnel_idle_timeout: 10m
@@ -195,6 +201,8 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 | `max_connections_per_ip` | Maximum simultaneous client connections per source IP |
 | `max_tunnels` | Maximum simultaneous CONNECT tunnels |
 | `max_tunnels_per_ip` | Maximum simultaneous CONNECT tunnels per source IP |
+| `max_idle_conns` | Maximum idle outbound HTTP connections across all destinations |
+| `max_idle_conns_per_host` | Maximum idle outbound HTTP connections retained per destination |
 | `max_header_bytes` | Maximum size of incoming HTTP request headers |
 | `auth_max_failures` | Failed authentication attempts per IP before temporary blocking |
 | `allow_private_destinations` | Allow loopback, private, link-local, and other non-public destinations |
@@ -203,6 +211,7 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 | `tls_handshake_timeout` | Outbound TLS handshake timeout |
 | `tls_reload_interval` | How often new TLS handshakes check certificate files for a valid replacement |
 | `response_header_timeout` | Upstream CONNECT/HTTP response-header timeout |
+| `idle_conn_timeout` | How long an idle outbound HTTP connection remains pooled |
 | `read_header_timeout` | Incoming request-header timeout |
 | `idle_timeout` | Incoming keep-alive idle timeout |
 | `tunnel_idle_timeout` | Close a CONNECT tunnel after no traffic in either direction |

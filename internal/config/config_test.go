@@ -32,6 +32,14 @@ func TestDecodeConfig(t *testing.T) {
 						got.MaxTunnelsPerIP,
 					)
 				}
+				if got.MaxIdleConns != 100 || got.MaxIdleConnsPerHost != 10 || time.Duration(got.IdleConnTimeout) != 90*time.Second {
+					t.Errorf(
+						"HTTP transport defaults = idle %d, idle/host %d, timeout %s; want 100, 10, 1m30s",
+						got.MaxIdleConns,
+						got.MaxIdleConnsPerHost,
+						time.Duration(got.IdleConnTimeout),
+					)
+				}
 			},
 		},
 		{
@@ -44,6 +52,8 @@ func TestDecodeConfig(t *testing.T) {
 				"max_connections_per_ip: 20",
 				"max_tunnels: 50",
 				"max_tunnels_per_ip: 5",
+				"max_idle_conns: 80",
+				"max_idle_conns_per_host: 8",
 				"max_header_bytes: 32768",
 				"auth_max_failures: 7",
 				"allow_private_destinations: true",
@@ -52,6 +62,7 @@ func TestDecodeConfig(t *testing.T) {
 				"tls_handshake_timeout: 3s",
 				"tls_reload_interval: 350ms",
 				"response_header_timeout: 4s",
+				"idle_conn_timeout: 90s",
 				"read_header_timeout: 5s",
 				"idle_timeout: 6m",
 				"tunnel_idle_timeout: 8m",
@@ -78,6 +89,8 @@ func TestDecodeConfig(t *testing.T) {
 					"MaxConnectionsPerIP": 20,
 					"MaxTunnels":          50,
 					"MaxTunnelsPerIP":     5,
+					"MaxIdleConns":        80,
+					"MaxIdleConnsPerHost": 8,
 					"MaxHeaderBytes":      32768,
 					"AuthMaxFailures":     7,
 				}
@@ -86,6 +99,8 @@ func TestDecodeConfig(t *testing.T) {
 					"MaxConnectionsPerIP": got.MaxConnectionsPerIP,
 					"MaxTunnels":          got.MaxTunnels,
 					"MaxTunnelsPerIP":     got.MaxTunnelsPerIP,
+					"MaxIdleConns":        got.MaxIdleConns,
+					"MaxIdleConnsPerHost": got.MaxIdleConnsPerHost,
 					"MaxHeaderBytes":      got.MaxHeaderBytes,
 					"AuthMaxFailures":     got.AuthMaxFailures,
 				}
@@ -103,6 +118,7 @@ func TestDecodeConfig(t *testing.T) {
 					"TLSHandshakeTimeout":   3 * time.Second,
 					"TLSReloadInterval":     350 * time.Millisecond,
 					"ResponseHeaderTimeout": 4 * time.Second,
+					"IdleConnTimeout":       90 * time.Second,
 					"ReadHeaderTimeout":     5 * time.Second,
 					"IdleTimeout":           6 * time.Minute,
 					"TunnelIdleTimeout":     8 * time.Minute,
@@ -115,6 +131,7 @@ func TestDecodeConfig(t *testing.T) {
 					"TLSHandshakeTimeout":   time.Duration(got.TLSHandshakeTimeout),
 					"TLSReloadInterval":     time.Duration(got.TLSReloadInterval),
 					"ResponseHeaderTimeout": time.Duration(got.ResponseHeaderTimeout),
+					"IdleConnTimeout":       time.Duration(got.IdleConnTimeout),
 					"ReadHeaderTimeout":     time.Duration(got.ReadHeaderTimeout),
 					"IdleTimeout":           time.Duration(got.IdleTimeout),
 					"TunnelIdleTimeout":     time.Duration(got.TunnelIdleTimeout),
@@ -366,6 +383,13 @@ func TestValidateConfig(t *testing.T) {
 			wantMessage: "response_header_timeout must be greater than zero",
 		},
 		{
+			name: "nonpositive idle connection timeout",
+			mutate: func(config *Config) {
+				config.IdleConnTimeout = 0
+			},
+			wantMessage: "idle_conn_timeout must be greater than zero",
+		},
+		{
 			name: "nonpositive read header timeout",
 			mutate: func(config *Config) {
 				config.ReadHeaderTimeout = 0
@@ -434,6 +458,20 @@ func TestValidateConfig(t *testing.T) {
 				config.MaxTunnelsPerIP = config.MaxTunnels + 1
 			},
 			wantMessage: "max_tunnels_per_ip cannot exceed max_tunnels",
+		},
+		{
+			name: "nonpositive maximum idle connections",
+			mutate: func(config *Config) {
+				config.MaxIdleConns = 0
+			},
+			wantMessage: "max_idle_conns must be greater than zero",
+		},
+		{
+			name: "nonpositive per-host idle connections",
+			mutate: func(config *Config) {
+				config.MaxIdleConnsPerHost = 0
+			},
+			wantMessage: "max_idle_conns_per_host must be greater than zero",
 		},
 		{
 			name: "nonpositive header limit",
@@ -591,6 +629,8 @@ func TestApplyEnvOverridesParsesResourceLimits(t *testing.T) {
 		"PROXY_MAX_CONNECTIONS_PER_IP":     "20",
 		"PROXY_MAX_TUNNELS":                "50",
 		"PROXY_MAX_TUNNELS_PER_IP":         "5",
+		"PROXY_MAX_IDLE_CONNS":             "80",
+		"PROXY_MAX_IDLE_CONNS_PER_HOST":    "8",
 		"PROXY_MAX_HEADER_BYTES":           "32768",
 		"PROXY_AUTH_MAX_FAILURES":          "7",
 		"PROXY_ALLOW_PRIVATE_DESTINATIONS": "true",
@@ -608,6 +648,9 @@ func TestApplyEnvOverridesParsesResourceLimits(t *testing.T) {
 	}
 	if config.MaxTunnels != 50 || config.MaxTunnelsPerIP != 5 {
 		t.Fatalf("tunnel limits = %d/%d, want 50/5", config.MaxTunnels, config.MaxTunnelsPerIP)
+	}
+	if config.MaxIdleConns != 80 || config.MaxIdleConnsPerHost != 8 {
+		t.Fatalf("HTTP idle connection limits = %d/%d, want 80/8", config.MaxIdleConns, config.MaxIdleConnsPerHost)
 	}
 	if config.MaxHeaderBytes != 32768 || config.AuthMaxFailures != 7 {
 		t.Fatalf("header/auth limits = %d/%d, want 32768/7", config.MaxHeaderBytes, config.AuthMaxFailures)
@@ -692,6 +735,7 @@ func TestApplyEnvOverridesParsesDurations(t *testing.T) {
 		{name: "TLS handshake", envName: "PROXY_TLS_HANDSHAKE_TIMEOUT", value: "11s", get: func(c Config) time.Duration { return time.Duration(c.TLSHandshakeTimeout) }, want: 11 * time.Second},
 		{name: "TLS reload", envName: "PROXY_TLS_RELOAD_INTERVAL", value: "45s", get: func(c Config) time.Duration { return time.Duration(c.TLSReloadInterval) }, want: 45 * time.Second},
 		{name: "response header", envName: "PROXY_RESPONSE_HEADER_TIMEOUT", value: "12s", get: func(c Config) time.Duration { return time.Duration(c.ResponseHeaderTimeout) }, want: 12 * time.Second},
+		{name: "idle connection", envName: "PROXY_IDLE_CONN_TIMEOUT", value: "75s", get: func(c Config) time.Duration { return time.Duration(c.IdleConnTimeout) }, want: 75 * time.Second},
 		{name: "read header", envName: "PROXY_READ_HEADER_TIMEOUT", value: "13s", get: func(c Config) time.Duration { return time.Duration(c.ReadHeaderTimeout) }, want: 13 * time.Second},
 		{name: "idle", envName: "PROXY_IDLE_TIMEOUT", value: "3m", get: func(c Config) time.Duration { return time.Duration(c.IdleTimeout) }, want: 3 * time.Minute},
 		{name: "tunnel idle", envName: "PROXY_TUNNEL_IDLE_TIMEOUT", value: "4m", get: func(c Config) time.Duration { return time.Duration(c.TunnelIdleTimeout) }, want: 4 * time.Minute},
@@ -725,6 +769,7 @@ func TestApplyEnvOverridesRejectsInvalidDurations(t *testing.T) {
 		{name: "TLS handshake", envName: "PROXY_TLS_HANDSHAKE_TIMEOUT"},
 		{name: "TLS reload", envName: "PROXY_TLS_RELOAD_INTERVAL"},
 		{name: "response header", envName: "PROXY_RESPONSE_HEADER_TIMEOUT"},
+		{name: "idle connection", envName: "PROXY_IDLE_CONN_TIMEOUT"},
 		{name: "read header", envName: "PROXY_READ_HEADER_TIMEOUT"},
 		{name: "idle", envName: "PROXY_IDLE_TIMEOUT"},
 		{name: "tunnel idle", envName: "PROXY_TUNNEL_IDLE_TIMEOUT"},
@@ -766,6 +811,8 @@ func clearProxyEnvironment(t *testing.T) {
 		"PROXY_MAX_CONNECTIONS_PER_IP",
 		"PROXY_MAX_TUNNELS",
 		"PROXY_MAX_TUNNELS_PER_IP",
+		"PROXY_MAX_IDLE_CONNS",
+		"PROXY_MAX_IDLE_CONNS_PER_HOST",
 		"PROXY_MAX_HEADER_BYTES",
 		"PROXY_AUTH_MAX_FAILURES",
 		"PROXY_ALLOW_PRIVATE_DESTINATIONS",
@@ -774,6 +821,7 @@ func clearProxyEnvironment(t *testing.T) {
 		"PROXY_TLS_HANDSHAKE_TIMEOUT",
 		"PROXY_TLS_RELOAD_INTERVAL",
 		"PROXY_RESPONSE_HEADER_TIMEOUT",
+		"PROXY_IDLE_CONN_TIMEOUT",
 		"PROXY_READ_HEADER_TIMEOUT",
 		"PROXY_IDLE_TIMEOUT",
 		"PROXY_TUNNEL_IDLE_TIMEOUT",

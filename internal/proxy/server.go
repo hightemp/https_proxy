@@ -89,9 +89,9 @@ func NewServer(cfg config.Config) (*Server, error) {
 	transport := &http.Transport{
 		Proxy:                 proxyFunc,
 		DisableCompression:    true,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          cfg.MaxIdleConns,
+		MaxIdleConnsPerHost:   cfg.MaxIdleConnsPerHost,
+		IdleConnTimeout:       time.Duration(cfg.IdleConnTimeout),
 		TLSHandshakeTimeout:   time.Duration(cfg.TLSHandshakeTimeout),
 		ResponseHeaderTimeout: time.Duration(cfg.ResponseHeaderTimeout),
 		ExpectContinueTimeout: time.Second,

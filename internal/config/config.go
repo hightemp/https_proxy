@@ -54,6 +54,8 @@ type Config struct {
 	MaxConnectionsPerIP      int      `yaml:"max_connections_per_ip"`
 	MaxTunnels               int      `yaml:"max_tunnels"`
 	MaxTunnelsPerIP          int      `yaml:"max_tunnels_per_ip"`
+	MaxIdleConns             int      `yaml:"max_idle_conns"`
+	MaxIdleConnsPerHost      int      `yaml:"max_idle_conns_per_host"`
 	MaxHeaderBytes           int      `yaml:"max_header_bytes"`
 	AuthMaxFailures          int      `yaml:"auth_max_failures"`
 	AllowPrivateDestinations bool     `yaml:"allow_private_destinations"`
@@ -62,6 +64,7 @@ type Config struct {
 	TLSHandshakeTimeout      Duration `yaml:"tls_handshake_timeout"`
 	TLSReloadInterval        Duration `yaml:"tls_reload_interval"`
 	ResponseHeaderTimeout    Duration `yaml:"response_header_timeout"`
+	IdleConnTimeout          Duration `yaml:"idle_conn_timeout"`
 	ReadHeaderTimeout        Duration `yaml:"read_header_timeout"`
 	IdleTimeout              Duration `yaml:"idle_timeout"`
 	TunnelIdleTimeout        Duration `yaml:"tunnel_idle_timeout"`
@@ -84,6 +87,8 @@ func defaultConfig() Config {
 		MaxConnectionsPerIP:     128,
 		MaxTunnels:              256,
 		MaxTunnelsPerIP:         128,
+		MaxIdleConns:            100,
+		MaxIdleConnsPerHost:     10,
 		MaxHeaderBytes:          64 << 10,
 		AuthMaxFailures:         10,
 		BlockedDestinationPorts: []int{21, 22, 23, 25, 110, 111, 135, 137, 138, 139, 445, 1433, 2049, 2375, 2376, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017},
@@ -91,6 +96,7 @@ func defaultConfig() Config {
 		TLSHandshakeTimeout:     Duration(10 * time.Second),
 		TLSReloadInterval:       Duration(time.Minute),
 		ResponseHeaderTimeout:   Duration(30 * time.Second),
+		IdleConnTimeout:         Duration(90 * time.Second),
 		ReadHeaderTimeout:       Duration(15 * time.Second),
 		IdleTimeout:             Duration(2 * time.Minute),
 		TunnelIdleTimeout:       Duration(10 * time.Minute),
@@ -149,12 +155,14 @@ func decodeConfig(r io.Reader) (Config, error) {
 //	PROXY_CERT_PATH, PROXY_KEY_PATH, PROXY_UPSTREAM_PROXY, PROXY_NETWORK,
 //	PROXY_LOG_SENSITIVE_DATA, PROXY_MAX_CONNECTIONS,
 //	PROXY_MAX_CONNECTIONS_PER_IP, PROXY_MAX_TUNNELS,
-//	PROXY_MAX_TUNNELS_PER_IP, PROXY_MAX_HEADER_BYTES,
+//	PROXY_MAX_TUNNELS_PER_IP, PROXY_MAX_IDLE_CONNS,
+//	PROXY_MAX_IDLE_CONNS_PER_HOST, PROXY_MAX_HEADER_BYTES,
 //	PROXY_AUTH_MAX_FAILURES, PROXY_ALLOW_PRIVATE_DESTINATIONS,
 //	PROXY_BLOCKED_DESTINATION_PORTS,
 //	PROXY_DIAL_TIMEOUT, PROXY_TLS_HANDSHAKE_TIMEOUT,
 //	PROXY_TLS_RELOAD_INTERVAL,
-//	PROXY_RESPONSE_HEADER_TIMEOUT, PROXY_READ_HEADER_TIMEOUT,
+//	PROXY_RESPONSE_HEADER_TIMEOUT, PROXY_IDLE_CONN_TIMEOUT,
+//	PROXY_READ_HEADER_TIMEOUT,
 //	PROXY_IDLE_TIMEOUT, PROXY_TUNNEL_IDLE_TIMEOUT,
 //	PROXY_AUTH_FAILURE_WINDOW, PROXY_AUTH_BLOCK_DURATION,
 //	PROXY_SHUTDOWN_TIMEOUT.
@@ -210,6 +218,8 @@ func applyEnvOverrides(c *Config) error {
 		{"PROXY_MAX_CONNECTIONS_PER_IP", &c.MaxConnectionsPerIP},
 		{"PROXY_MAX_TUNNELS", &c.MaxTunnels},
 		{"PROXY_MAX_TUNNELS_PER_IP", &c.MaxTunnelsPerIP},
+		{"PROXY_MAX_IDLE_CONNS", &c.MaxIdleConns},
+		{"PROXY_MAX_IDLE_CONNS_PER_HOST", &c.MaxIdleConnsPerHost},
 		{"PROXY_MAX_HEADER_BYTES", &c.MaxHeaderBytes},
 		{"PROXY_AUTH_MAX_FAILURES", &c.AuthMaxFailures},
 	}
@@ -241,6 +251,7 @@ func applyEnvOverrides(c *Config) error {
 		{"PROXY_TLS_HANDSHAKE_TIMEOUT", &c.TLSHandshakeTimeout},
 		{"PROXY_TLS_RELOAD_INTERVAL", &c.TLSReloadInterval},
 		{"PROXY_RESPONSE_HEADER_TIMEOUT", &c.ResponseHeaderTimeout},
+		{"PROXY_IDLE_CONN_TIMEOUT", &c.IdleConnTimeout},
 		{"PROXY_READ_HEADER_TIMEOUT", &c.ReadHeaderTimeout},
 		{"PROXY_IDLE_TIMEOUT", &c.IdleTimeout},
 		{"PROXY_TUNNEL_IDLE_TIMEOUT", &c.TunnelIdleTimeout},
@@ -293,6 +304,7 @@ func validateConfig(config *Config) error {
 		{"tls_handshake_timeout", config.TLSHandshakeTimeout},
 		{"tls_reload_interval", config.TLSReloadInterval},
 		{"response_header_timeout", config.ResponseHeaderTimeout},
+		{"idle_conn_timeout", config.IdleConnTimeout},
 		{"read_header_timeout", config.ReadHeaderTimeout},
 		{"idle_timeout", config.IdleTimeout},
 		{"tunnel_idle_timeout", config.TunnelIdleTimeout},
@@ -309,6 +321,8 @@ func validateConfig(config *Config) error {
 		{"max_connections_per_ip", config.MaxConnectionsPerIP},
 		{"max_tunnels", config.MaxTunnels},
 		{"max_tunnels_per_ip", config.MaxTunnelsPerIP},
+		{"max_idle_conns", config.MaxIdleConns},
+		{"max_idle_conns_per_host", config.MaxIdleConnsPerHost},
 		{"max_header_bytes", config.MaxHeaderBytes},
 		{"auth_max_failures", config.AuthMaxFailures},
 	}
