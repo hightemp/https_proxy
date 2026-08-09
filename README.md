@@ -326,6 +326,23 @@ make start / stop / restart / status
 | `make docker-push` | Build and push image to Docker Hub |
 | `make docker-release` | Alias for `docker-push` |
 
+## Testing
+
+Run the complete test suite with the race detector:
+
+```sh
+go test -race ./...
+```
+
+Generate a local coverage summary:
+
+```sh
+go test -covermode=atomic -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+```
+
+The test workflow runs for pushes and pull requests and enforces at least 85% total statement coverage.
+
 ## Release
 
 1. Update the version in the `VERSION` file.

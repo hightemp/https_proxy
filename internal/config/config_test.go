@@ -134,6 +134,66 @@ func TestDecodeConfig(t *testing.T) {
 	}
 }
 
+func TestLoadAppliesFileAndEnvironment(t *testing.T) {
+	clearProxyEnvironment(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	contents := []byte("proxy_addr: 127.0.0.1:8081\nnetwork: tcp4\n")
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PROXY_ADDR", "127.0.0.1:8082")
+	t.Setenv("PROXY_MAX_CONNECTIONS", "200")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ProxyAddr != "127.0.0.1:8082" {
+		t.Fatalf("ProxyAddr = %q, want environment override", cfg.ProxyAddr)
+	}
+	if cfg.Network != "tcp4" {
+		t.Fatalf("Network = %q, want file value", cfg.Network)
+	}
+	if cfg.MaxConnections != 200 {
+		t.Fatalf("MaxConnections = %d, want 200", cfg.MaxConnections)
+	}
+}
+
+func TestLoadRejectsInvalidInputs(t *testing.T) {
+	tests := []struct {
+		name        string
+		contents    string
+		environment map[string]string
+		missing     bool
+		wantMessage string
+	}{
+		{name: "missing file", missing: true, wantMessage: "read config"},
+		{name: "invalid YAML", contents: "unexpected: [", wantMessage: "parse config"},
+		{name: "invalid environment", contents: "{}\n", environment: map[string]string{"PROXY_MAX_CONNECTIONS": "many"}, wantMessage: "PROXY_MAX_CONNECTIONS"},
+		{name: "invalid merged config", contents: "{}\n", environment: map[string]string{"PROXY_MAX_CONNECTIONS": "1", "PROXY_MAX_CONNECTIONS_PER_IP": "2"}, wantMessage: "cannot exceed"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clearProxyEnvironment(t)
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if !test.missing {
+				if err := os.WriteFile(path, []byte(test.contents), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+			}
+			for name, value := range test.environment {
+				t.Setenv(name, value)
+			}
+
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), test.wantMessage) {
+				t.Fatalf("Load() error = %v, want message %q", err, test.wantMessage)
+			}
+		})
+	}
+}
+
 func TestExampleConfigsAreValid(t *testing.T) {
 	for _, name := range []string{"config.example.yaml", "config.docker.yaml"} {
 		t.Run(name, func(t *testing.T) {

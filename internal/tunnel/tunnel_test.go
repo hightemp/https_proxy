@@ -1,11 +1,46 @@
 package tunnel
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
+
+type closeWriteConn struct {
+	net.Conn
+	called bool
+	err    error
+}
+
+func (c *closeWriteConn) CloseWrite() error {
+	c.called = true
+	return c.err
+}
+
+type halfCloseWriter struct {
+	buffer    bytes.Buffer
+	writeErr  error
+	closeErr  error
+	closeCall bool
+}
+
+func (w *halfCloseWriter) Write(buffer []byte) (int, error) {
+	if w.writeErr != nil {
+		return 0, w.writeErr
+	}
+	return w.buffer.Write(buffer)
+}
+
+func (w *halfCloseWriter) CloseWrite() error {
+	w.closeCall = true
+	return w.closeErr
+}
 
 func TestRegistryClosesTrackedConnectionsAndRejectsNew(t *testing.T) {
 	registry := NewRegistry()
@@ -37,6 +72,66 @@ func TestRegistryClosesTrackedConnectionsAndRejectsNew(t *testing.T) {
 	}
 	if _, err := destinationPeer.Read(buffer); err == nil {
 		t.Fatal("destination peer remains open after registry shutdown")
+	}
+}
+
+func TestRegistryWaitHonorsContextCancellation(t *testing.T) {
+	registry := NewRegistry()
+	client, clientPeer := net.Pipe()
+	destination, destinationPeer := net.Pipe()
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = clientPeer.Close()
+		_ = destination.Close()
+		_ = destinationPeer.Close()
+	})
+	release, tracked := registry.Track(client, destination)
+	if !tracked {
+		t.Fatal("Track() = false before shutdown")
+	}
+	defer release()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := registry.Wait(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Wait() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestBufferedConnReadsBufferedDataAndForwardsCloseWrite(t *testing.T) {
+	base, peer := net.Pipe()
+	t.Cleanup(func() {
+		_ = base.Close()
+		_ = peer.Close()
+	})
+	closeWriteError := errors.New("close write failed")
+	forwarding := &closeWriteConn{Conn: base, err: closeWriteError}
+	connection := NewBufferedConn(forwarding, bufio.NewReader(strings.NewReader("buffered data")))
+
+	payload, err := io.ReadAll(connection)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if string(payload) != "buffered data" {
+		t.Fatalf("Read() = %q, want buffered data", payload)
+	}
+	if err := connection.CloseWrite(); !errors.Is(err, closeWriteError) {
+		t.Fatalf("CloseWrite() error = %v, want %v", err, closeWriteError)
+	}
+	if !forwarding.called {
+		t.Fatal("CloseWrite() was not forwarded")
+	}
+}
+
+func TestBufferedConnCloseWriteIsOptional(t *testing.T) {
+	base, peer := net.Pipe()
+	t.Cleanup(func() {
+		_ = base.Close()
+		_ = peer.Close()
+	})
+	connection := NewBufferedConn(base, bufio.NewReader(base))
+	if err := connection.CloseWrite(); err != nil {
+		t.Fatalf("CloseWrite() error = %v, want nil", err)
 	}
 }
 
@@ -96,5 +191,63 @@ func TestRelayActivityResetsIdleTimeout(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * idleTimeout):
 		t.Fatal("Relay() did not stop after activity ceased")
+	}
+}
+
+func TestIdleControllerIgnoresActivityAndExpiryAfterStop(t *testing.T) {
+	timedOut := make(chan struct{}, 1)
+	controller := newIdleController(time.Hour, func() { timedOut <- struct{}{} })
+	controller.stop()
+	controller.stop()
+	controller.touch()
+	controller.expire()
+
+	select {
+	case <-timedOut:
+		t.Fatal("stopped idle controller invoked timeout callback")
+	default:
+	}
+}
+
+func TestIdleControllerReschedulesPrematureExpiry(t *testing.T) {
+	timedOut := make(chan struct{}, 1)
+	controller := newIdleController(time.Hour, func() { timedOut <- struct{}{} })
+	controller.touch()
+	controller.expire()
+	controller.stop()
+
+	select {
+	case <-timedOut:
+		t.Fatal("premature expiry invoked timeout callback")
+	default:
+	}
+}
+
+func TestCopyAndHalfCloseReportsTransferAndCloseErrors(t *testing.T) {
+	writeError := errors.New("write failed")
+	closeError := errors.New("close write failed")
+	tests := []struct {
+		name          string
+		writer        *halfCloseWriter
+		wantError     error
+		wantCloseCall bool
+	}{
+		{name: "success", writer: &halfCloseWriter{}, wantCloseCall: true},
+		{name: "write error", writer: &halfCloseWriter{writeErr: writeError}, wantError: writeError},
+		{name: "close error", writer: &halfCloseWriter{closeErr: closeError}, wantError: closeError, wantCloseCall: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			results := make(chan error, 1)
+			copyAndHalfClose(test.writer, strings.NewReader("payload"), results)
+			err := <-results
+			if !errors.Is(err, test.wantError) {
+				t.Fatalf("copyAndHalfClose() error = %v, want %v", err, test.wantError)
+			}
+			if test.writer.closeCall != test.wantCloseCall {
+				t.Fatalf("CloseWrite() called = %t, want %t", test.writer.closeCall, test.wantCloseCall)
+			}
+		})
 	}
 }

@@ -22,6 +22,13 @@ import (
 const maxConnectResponseHeaderBytes = 64 << 10
 
 func buildProxyFunc(rawURL string) (func(*http.Request) (*url.URL, error), error) {
+	return buildProxyFuncWithEnvironment(rawURL, http.ProxyFromEnvironment)
+}
+
+func buildProxyFuncWithEnvironment(
+	rawURL string,
+	proxyFromEnvironment func(*http.Request) (*url.URL, error),
+) (func(*http.Request) (*url.URL, error), error) {
 	if rawURL == config.DirectUpstream {
 		return func(*http.Request) (*url.URL, error) {
 			return nil, nil
@@ -36,7 +43,7 @@ func buildProxyFunc(rawURL string) (func(*http.Request) (*url.URL, error), error
 	}
 
 	return func(request *http.Request) (*url.URL, error) {
-		proxyURL, err := http.ProxyFromEnvironment(request)
+		proxyURL, err := proxyFromEnvironment(request)
 		if err != nil || proxyURL == nil {
 			return proxyURL, err
 		}
