@@ -44,7 +44,7 @@ func (a *Basic) Authenticate(w http.ResponseWriter, r *http.Request) bool {
 	payload, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
 	if err != nil {
 		slog.Warn("Error decoding auth", "error", err, "remote", r.RemoteAddr)
-		w.WriteHeader(http.StatusBadRequest)
+		writeRequired(w)
 		return false
 	}
 

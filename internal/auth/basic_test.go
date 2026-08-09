@@ -23,7 +23,7 @@ func TestBasicAuthenticate(t *testing.T) {
 		{name: "missing header", username: "alice", password: "secret", wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
 		{name: "wrong password", username: "alice", password: "secret", header: "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:wrong")), wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
 		{name: "unsupported scheme", username: "alice", password: "secret", header: "Bearer token", wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
-		{name: "invalid base64", username: "alice", password: "secret", header: "Basic !!!", wantStatus: http.StatusBadRequest},
+		{name: "invalid base64", username: "alice", password: "secret", header: "Basic !!!", wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
 		{name: "invalid payload", username: "alice", password: "secret", header: "Basic " + base64.StdEncoding.EncodeToString([]byte("alice")), wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
 	}
 
