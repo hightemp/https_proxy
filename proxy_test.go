@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -493,6 +495,65 @@ func TestHTTPForwardingRemovesDynamicHopHeaders(t *testing.T) {
 	}
 	if value := response.Header.Get("X-End-To-End"); value != "keep me" {
 		t.Fatalf("end-to-end response header = %q", value)
+	}
+	if err := <-originResult; err != nil {
+		t.Fatalf("origin: %v", err)
+	}
+}
+
+func TestHTTPForwardingPreservesCompression(t *testing.T) {
+	var compressed bytes.Buffer
+	gzipWriter := gzip.NewWriter(&compressed)
+	if _, err := gzipWriter.Write([]byte("compressed response")); err != nil {
+		t.Fatalf("compress response: %v", err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	compressedPayload := append([]byte(nil), compressed.Bytes()...)
+
+	acceptEncoding := make(chan string, 1)
+	originResult := make(chan error, 1)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acceptEncoding <- r.Header.Get("Accept-Encoding")
+		w.Header().Set("Content-Encoding", "gzip")
+		_, err := w.Write(compressedPayload)
+		originResult <- err
+	}))
+	t.Cleanup(origin.Close)
+
+	proxy := newDirectTestProxy(t)
+	proxyHTTP := httptest.NewServer(proxy)
+	t.Cleanup(proxyHTTP.Close)
+	proxyURL, err := url.Parse(proxyHTTP.URL)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+	transport := &http.Transport{
+		Proxy:              http.ProxyURL(proxyURL),
+		DisableCompression: true,
+	}
+	t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Transport: transport, Timeout: testIOTimeout}
+
+	response, err := client.Get(origin.URL)
+	if err != nil {
+		t.Fatalf("client.Get() error = %v", err)
+	}
+	defer response.Body.Close()
+
+	if got := <-acceptEncoding; got != "" {
+		t.Fatalf("origin Accept-Encoding = %q, want empty", got)
+	}
+	if got := response.Header.Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("response Content-Encoding = %q, want gzip", got)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if !bytes.Equal(body, compressedPayload) {
+		t.Fatalf("response body was transformed: got %d bytes, want %d", len(body), len(compressedPayload))
 	}
 	if err := <-originResult; err != nil {
 		t.Fatalf("origin: %v", err)

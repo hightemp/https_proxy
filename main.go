@@ -440,6 +440,7 @@ func newProxyServer(config Config) (*proxyServer, error) {
 	}
 	transport := &http.Transport{
 		Proxy:                 proxyFunc,
+		DisableCompression:    true,
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       90 * time.Second,
