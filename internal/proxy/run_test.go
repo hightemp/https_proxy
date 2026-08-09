@@ -3,6 +3,7 @@ package proxy
 import (
 	"net"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -40,6 +41,31 @@ func TestMakeListenerWrapsConnectionLimiter(t *testing.T) {
 	t.Cleanup(func() { _ = listener.Close() })
 	if _, ok := listener.(*limitedListener); !ok {
 		t.Fatalf("listener type = %T, want *limitedListener", listener)
+	}
+}
+
+func TestMakeTLSListenerUsesCertificateReloader(t *testing.T) {
+	directory := t.TempDir()
+	certificatePath := filepath.Join(directory, "certificate.pem")
+	keyPath := filepath.Join(directory, "private-key.pem")
+	writeTestCertificatePair(t, certificatePath, keyPath, 1)
+	cfg := config.Default()
+	cfg.ProxyAddr = "127.0.0.1:0"
+	cfg.Proto = "https"
+	cfg.CertPath = certificatePath
+	cfg.KeyPath = keyPath
+	server := newHTTPServer(cfg, http.NotFoundHandler())
+
+	listener, err := makeListener(cfg, server)
+	if err != nil {
+		t.Fatalf("makeListener() error = %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	if server.TLSConfig == nil || server.TLSConfig.GetCertificate == nil {
+		t.Fatal("TLS certificate reload callback is not configured")
+	}
+	if len(server.TLSConfig.Certificates) != 0 {
+		t.Fatal("static TLS certificate configured alongside reload callback")
 	}
 }
 

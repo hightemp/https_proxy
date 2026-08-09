@@ -54,6 +54,7 @@ services:
       PROXY_AUTH_BLOCK_DURATION: "${PROXY_AUTH_BLOCK_DURATION:-5m}"
       PROXY_ALLOW_PRIVATE_DESTINATIONS: "${PROXY_ALLOW_PRIVATE_DESTINATIONS:-false}"
       PROXY_BLOCKED_DESTINATION_PORTS: "${PROXY_BLOCKED_DESTINATION_PORTS:-}"
+      PROXY_TLS_RELOAD_INTERVAL: "${PROXY_TLS_RELOAD_INTERVAL:-1m}"
     volumes:
       - letsencrypt:/etc/letsencrypt:ro
     depends_on:
@@ -62,7 +63,8 @@ services:
   # Let's Encrypt certificate manager.
   # First-time issue:
   #   docker compose run --rm --service-ports certbot issue
-  # Then `docker compose up -d` runs auto-renewal in a loop.
+  # Then `docker compose up -d` runs auto-renewal in a loop. The HTTPS proxy
+  # detects renewed certificate files and reloads them without a restart.
   certbot:
     image: certbot/certbot:latest
     container_name: https_proxy_certbot

@@ -84,6 +84,7 @@ Any of these override the corresponding YAML field:
 | `PROXY_BLOCKED_DESTINATION_PORTS` | `blocked_destination_ports` (comma-separated ports or `none`) |
 | `PROXY_DIAL_TIMEOUT` | `dial_timeout` |
 | `PROXY_TLS_HANDSHAKE_TIMEOUT` | `tls_handshake_timeout` |
+| `PROXY_TLS_RELOAD_INTERVAL` | `tls_reload_interval` |
 | `PROXY_RESPONSE_HEADER_TIMEOUT` | `response_header_timeout` |
 | `PROXY_READ_HEADER_TIMEOUT` | `read_header_timeout` |
 | `PROXY_IDLE_TIMEOUT` | `idle_timeout` |
@@ -115,11 +116,7 @@ The bundled [docker-compose.yml](docker-compose.yml) starts an HTTP proxy, an HT
     docker compose up -d
     ```
 
-Certbot renews certificates automatically every 12 hours. Restart the HTTPS proxy after a renewal if needed:
-
-```sh
-docker compose restart https-proxy
-```
+Certbot checks for renewals every 12 hours. On new TLS handshakes, the HTTPS proxy checks the mounted certificate files at most once per `PROXY_TLS_RELOAD_INTERVAL` (one minute by default). A valid replacement is loaded without restarting the container or interrupting existing connections. If Certbot is temporarily updating the certificate/key pair or the new files are invalid, the proxy keeps the last valid certificate and retries later.
 
 ### Build from source
 
@@ -169,6 +166,7 @@ allow_private_destinations: false
 blocked_destination_ports: [21, 22, 23, 25, 110, 111, 135, 137, 138, 139, 445, 1433, 2049, 2375, 2376, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017]
 dial_timeout: 10s
 tls_handshake_timeout: 10s
+tls_reload_interval: 1m
 response_header_timeout: 30s
 read_header_timeout: 15s
 idle_timeout: 2m
@@ -203,6 +201,7 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 | `blocked_destination_ports` | Ports denied by destination policy; use `[]` to clear the YAML list |
 | `dial_timeout` | TCP connection timeout |
 | `tls_handshake_timeout` | Outbound TLS handshake timeout |
+| `tls_reload_interval` | How often new TLS handshakes check certificate files for a valid replacement |
 | `response_header_timeout` | Upstream CONNECT/HTTP response-header timeout |
 | `read_header_timeout` | Incoming request-header timeout |
 | `idle_timeout` | Incoming keep-alive idle timeout |
@@ -304,7 +303,7 @@ cert_path: /etc/https_proxy/certs/cert.pem
 key_path: /etc/https_proxy/certs/key.pem
 ```
 
-If Certbot manages the source certificate, deploy a copy with these ownership and mode settings from a renewal hook before restarting the service. Direct paths under `/home` are intentionally inaccessible to the hardened unit.
+If Certbot manages the source certificate, deploy a copy with these ownership and mode settings from a renewal hook. The proxy detects the replacement automatically; no service restart is required. Direct paths under `/home` are intentionally inaccessible to the hardened unit.
 
 Manage the service:
 

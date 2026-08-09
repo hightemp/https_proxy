@@ -60,6 +60,7 @@ type Config struct {
 	BlockedDestinationPorts  []int    `yaml:"blocked_destination_ports"`
 	DialTimeout              Duration `yaml:"dial_timeout"`
 	TLSHandshakeTimeout      Duration `yaml:"tls_handshake_timeout"`
+	TLSReloadInterval        Duration `yaml:"tls_reload_interval"`
 	ResponseHeaderTimeout    Duration `yaml:"response_header_timeout"`
 	ReadHeaderTimeout        Duration `yaml:"read_header_timeout"`
 	IdleTimeout              Duration `yaml:"idle_timeout"`
@@ -88,6 +89,7 @@ func defaultConfig() Config {
 		BlockedDestinationPorts: []int{21, 22, 23, 25, 110, 111, 135, 137, 138, 139, 445, 1433, 2049, 2375, 2376, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017},
 		DialTimeout:             Duration(10 * time.Second),
 		TLSHandshakeTimeout:     Duration(10 * time.Second),
+		TLSReloadInterval:       Duration(time.Minute),
 		ResponseHeaderTimeout:   Duration(30 * time.Second),
 		ReadHeaderTimeout:       Duration(15 * time.Second),
 		IdleTimeout:             Duration(2 * time.Minute),
@@ -148,6 +150,7 @@ func decodeConfig(r io.Reader) (Config, error) {
 //	PROXY_AUTH_MAX_FAILURES, PROXY_ALLOW_PRIVATE_DESTINATIONS,
 //	PROXY_BLOCKED_DESTINATION_PORTS,
 //	PROXY_DIAL_TIMEOUT, PROXY_TLS_HANDSHAKE_TIMEOUT,
+//	PROXY_TLS_RELOAD_INTERVAL,
 //	PROXY_RESPONSE_HEADER_TIMEOUT, PROXY_READ_HEADER_TIMEOUT,
 //	PROXY_IDLE_TIMEOUT, PROXY_TUNNEL_IDLE_TIMEOUT,
 //	PROXY_AUTH_FAILURE_WINDOW, PROXY_AUTH_BLOCK_DURATION,
@@ -233,6 +236,7 @@ func applyEnvOverrides(c *Config) error {
 	}{
 		{"PROXY_DIAL_TIMEOUT", &c.DialTimeout},
 		{"PROXY_TLS_HANDSHAKE_TIMEOUT", &c.TLSHandshakeTimeout},
+		{"PROXY_TLS_RELOAD_INTERVAL", &c.TLSReloadInterval},
 		{"PROXY_RESPONSE_HEADER_TIMEOUT", &c.ResponseHeaderTimeout},
 		{"PROXY_READ_HEADER_TIMEOUT", &c.ReadHeaderTimeout},
 		{"PROXY_IDLE_TIMEOUT", &c.IdleTimeout},
@@ -284,6 +288,7 @@ func validateConfig(config *Config) error {
 	}{
 		{"dial_timeout", config.DialTimeout},
 		{"tls_handshake_timeout", config.TLSHandshakeTimeout},
+		{"tls_reload_interval", config.TLSReloadInterval},
 		{"response_header_timeout", config.ResponseHeaderTimeout},
 		{"read_header_timeout", config.ReadHeaderTimeout},
 		{"idle_timeout", config.IdleTimeout},

@@ -42,6 +42,7 @@ func TestDecodeConfig(t *testing.T) {
 				"blocked_destination_ports: [22, 25]",
 				"dial_timeout: 250ms",
 				"tls_handshake_timeout: 3s",
+				"tls_reload_interval: 350ms",
 				"response_header_timeout: 4s",
 				"read_header_timeout: 5s",
 				"idle_timeout: 6m",
@@ -92,6 +93,7 @@ func TestDecodeConfig(t *testing.T) {
 				wantDurations := map[string]time.Duration{
 					"DialTimeout":           250 * time.Millisecond,
 					"TLSHandshakeTimeout":   3 * time.Second,
+					"TLSReloadInterval":     350 * time.Millisecond,
 					"ResponseHeaderTimeout": 4 * time.Second,
 					"ReadHeaderTimeout":     5 * time.Second,
 					"IdleTimeout":           6 * time.Minute,
@@ -103,6 +105,7 @@ func TestDecodeConfig(t *testing.T) {
 				gotDurations := map[string]time.Duration{
 					"DialTimeout":           time.Duration(got.DialTimeout),
 					"TLSHandshakeTimeout":   time.Duration(got.TLSHandshakeTimeout),
+					"TLSReloadInterval":     time.Duration(got.TLSReloadInterval),
 					"ResponseHeaderTimeout": time.Duration(got.ResponseHeaderTimeout),
 					"ReadHeaderTimeout":     time.Duration(got.ReadHeaderTimeout),
 					"IdleTimeout":           time.Duration(got.IdleTimeout),
@@ -279,6 +282,13 @@ func TestValidateConfig(t *testing.T) {
 				config.TLSHandshakeTimeout = Duration(-time.Second)
 			},
 			wantMessage: "tls_handshake_timeout must be greater than zero",
+		},
+		{
+			name: "nonpositive TLS reload interval",
+			mutate: func(config *Config) {
+				config.TLSReloadInterval = 0
+			},
+			wantMessage: "tls_reload_interval must be greater than zero",
 		},
 		{
 			name: "nonpositive response header timeout",
@@ -612,6 +622,7 @@ func TestApplyEnvOverridesParsesDurations(t *testing.T) {
 	}{
 		{name: "dial", envName: "PROXY_DIAL_TIMEOUT", value: "1500ms", get: func(c Config) time.Duration { return time.Duration(c.DialTimeout) }, want: 1500 * time.Millisecond},
 		{name: "TLS handshake", envName: "PROXY_TLS_HANDSHAKE_TIMEOUT", value: "11s", get: func(c Config) time.Duration { return time.Duration(c.TLSHandshakeTimeout) }, want: 11 * time.Second},
+		{name: "TLS reload", envName: "PROXY_TLS_RELOAD_INTERVAL", value: "45s", get: func(c Config) time.Duration { return time.Duration(c.TLSReloadInterval) }, want: 45 * time.Second},
 		{name: "response header", envName: "PROXY_RESPONSE_HEADER_TIMEOUT", value: "12s", get: func(c Config) time.Duration { return time.Duration(c.ResponseHeaderTimeout) }, want: 12 * time.Second},
 		{name: "read header", envName: "PROXY_READ_HEADER_TIMEOUT", value: "13s", get: func(c Config) time.Duration { return time.Duration(c.ReadHeaderTimeout) }, want: 13 * time.Second},
 		{name: "idle", envName: "PROXY_IDLE_TIMEOUT", value: "3m", get: func(c Config) time.Duration { return time.Duration(c.IdleTimeout) }, want: 3 * time.Minute},
@@ -644,6 +655,7 @@ func TestApplyEnvOverridesRejectsInvalidDurations(t *testing.T) {
 	}{
 		{name: "dial", envName: "PROXY_DIAL_TIMEOUT"},
 		{name: "TLS handshake", envName: "PROXY_TLS_HANDSHAKE_TIMEOUT"},
+		{name: "TLS reload", envName: "PROXY_TLS_RELOAD_INTERVAL"},
 		{name: "response header", envName: "PROXY_RESPONSE_HEADER_TIMEOUT"},
 		{name: "read header", envName: "PROXY_READ_HEADER_TIMEOUT"},
 		{name: "idle", envName: "PROXY_IDLE_TIMEOUT"},
@@ -692,6 +704,7 @@ func clearProxyEnvironment(t *testing.T) {
 		"PROXY_BLOCKED_DESTINATION_PORTS",
 		"PROXY_DIAL_TIMEOUT",
 		"PROXY_TLS_HANDSHAKE_TIMEOUT",
+		"PROXY_TLS_RELOAD_INTERVAL",
 		"PROXY_RESPONSE_HEADER_TIMEOUT",
 		"PROXY_READ_HEADER_TIMEOUT",
 		"PROXY_IDLE_TIMEOUT",

@@ -86,13 +86,17 @@ func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
 func makeListener(cfg config.Config, server *http.Server) (net.Listener, error) {
 	var tlsConfig *tls.Config
 	if cfg.Proto == "https" {
-		certificate, err := tls.LoadX509KeyPair(cfg.CertPath, cfg.KeyPath)
+		certificateReloader, err := newCertificateReloader(
+			cfg.CertPath,
+			cfg.KeyPath,
+			time.Duration(cfg.TLSReloadInterval),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("load certificate: %w", err)
 		}
 		tlsConfig = &tls.Config{
-			Certificates: []tls.Certificate{certificate},
-			MinVersion:   tls.VersionTLS12,
+			GetCertificate: certificateReloader.getCertificate,
+			MinVersion:     tls.VersionTLS12,
 		}
 		server.TLSConfig = tlsConfig
 	}
