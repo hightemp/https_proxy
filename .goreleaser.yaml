@@ -9,7 +9,7 @@ before:
 
 builds:
   - id: https-proxy
-    main: ./main.go
+    main: ./cmd/https_proxy
     binary: https_proxy
     env:
       - CGO_ENABLED=0
@@ -45,7 +45,7 @@ nfpms:
     formats:
       - deb
       - rpm
-    builds:
+    ids:
       - https-proxy
     bindir: /usr/bin
     contents:
