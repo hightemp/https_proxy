@@ -286,6 +286,24 @@ key_path: "/etc/letsencrypt/live/example.com/privkey.pem"
 sudo make install
 ```
 
+The installer creates a locked system account named `https_proxy`; the service does not run as root. The configuration remains owned by `root`, is readable by the `https_proxy` group, and is not writable by the service. The unit also isolates devices and home directories, denies Linux capabilities, and prevents namespace creation.
+
+TLS files used by the system service must be readable by the `https_proxy` group. A protected directory is created automatically; install certificates without making the private key world-readable:
+
+```sh
+sudo install -o root -g https_proxy -m 0640 cert.pem /etc/https_proxy/certs/cert.pem
+sudo install -o root -g https_proxy -m 0640 key.pem /etc/https_proxy/certs/key.pem
+```
+
+Then use these paths in `/etc/https_proxy/config.yaml`:
+
+```yaml
+cert_path: /etc/https_proxy/certs/cert.pem
+key_path: /etc/https_proxy/certs/key.pem
+```
+
+If Certbot manages the source certificate, deploy a copy with these ownership and mode settings from a renewal hook before restarting the service. Direct paths under `/home` are intentionally inaccessible to the hardened unit.
+
 Manage the service:
 
 ```sh

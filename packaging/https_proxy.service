@@ -4,6 +4,8 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
+User=https_proxy
+Group=https_proxy
 ExecStart=/usr/bin/https_proxy --config /etc/https_proxy/config.yaml
 Restart=on-failure
 RestartSec=2s
@@ -12,10 +14,14 @@ LimitNOFILE=65536
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
+ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
+CapabilityBoundingSet=
+RestrictNamespaces=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
