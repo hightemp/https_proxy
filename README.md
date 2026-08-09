@@ -157,9 +157,9 @@ key_path: ""
 network: auto
 log_sensitive_data: false
 max_connections: 1024
-max_connections_per_ip: 64
+max_connections_per_ip: 128
 max_tunnels: 256
-max_tunnels_per_ip: 16
+max_tunnels_per_ip: 128
 max_header_bytes: 65536
 auth_max_failures: 10
 allow_private_destinations: false

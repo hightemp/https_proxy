@@ -24,6 +24,14 @@ func TestDecodeConfig(t *testing.T) {
 				if !reflect.DeepEqual(got, want) {
 					t.Fatalf("decodeConfig() = %+v, want %+v", got, want)
 				}
+				if got.MaxConnectionsPerIP != 128 || got.MaxTunnels != 256 || got.MaxTunnelsPerIP != 128 {
+					t.Errorf(
+						"resource limits = connections/IP %d, tunnels %d, tunnels/IP %d; want 128, 256, 128",
+						got.MaxConnectionsPerIP,
+						got.MaxTunnels,
+						got.MaxTunnelsPerIP,
+					)
+				}
 			},
 		},
 		{
