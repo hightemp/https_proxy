@@ -8,7 +8,9 @@ import (
 )
 
 func TestBasicAuthenticate(t *testing.T) {
-	validHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:secret"))
+	basicHeader := func(username, password string) string {
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+	}
 	tests := []struct {
 		name          string
 		username      string
@@ -19,9 +21,12 @@ func TestBasicAuthenticate(t *testing.T) {
 		wantChallenge bool
 	}{
 		{name: "disabled", wantOK: true},
-		{name: "valid credentials", username: "alice", password: "secret", header: validHeader, wantOK: true},
+		{name: "valid credentials", username: "alice", password: "secret", header: basicHeader("alice", "secret"), wantOK: true},
+		{name: "valid empty username", password: "secret", header: basicHeader("", "secret"), wantOK: true},
+		{name: "valid empty password", username: "alice", header: basicHeader("alice", ""), wantOK: true},
 		{name: "missing header", username: "alice", password: "secret", wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
-		{name: "wrong password", username: "alice", password: "secret", header: "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:wrong")), wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
+		{name: "wrong username", username: "alice", password: "secret", header: basicHeader("bob", "secret"), wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
+		{name: "wrong password", username: "alice", password: "secret", header: basicHeader("alice", "wrong"), wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
 		{name: "unsupported scheme", username: "alice", password: "secret", header: "Bearer token", wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
 		{name: "invalid base64", username: "alice", password: "secret", header: "Basic !!!", wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},
 		{name: "invalid payload", username: "alice", password: "secret", header: "Basic " + base64.StdEncoding.EncodeToString([]byte("alice")), wantStatus: http.StatusProxyAuthRequired, wantChallenge: true},

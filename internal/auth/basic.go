@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"log/slog"
@@ -11,20 +12,25 @@ import (
 
 // Basic authenticates proxy requests against one configured credential pair.
 type Basic struct {
-	username string
-	password string
+	enabled      bool
+	usernameHash [sha256.Size]byte
+	passwordHash [sha256.Size]byte
 }
 
 // NewBasic creates a Basic authenticator. Authentication is disabled when both
 // username and password are empty.
 func NewBasic(username, password string) *Basic {
-	return &Basic{username: username, password: password}
+	return &Basic{
+		enabled:      username != "" || password != "",
+		usernameHash: sha256.Sum256([]byte(username)),
+		passwordHash: sha256.Sum256([]byte(password)),
+	}
 }
 
 // Authenticate validates Proxy-Authorization and writes an error response when
 // authentication fails.
 func (a *Basic) Authenticate(w http.ResponseWriter, r *http.Request) bool {
-	if a.username == "" && a.password == "" {
+	if !a.enabled {
 		return true
 	}
 
@@ -55,8 +61,10 @@ func (a *Basic) Authenticate(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	usernameMatch := subtle.ConstantTimeCompare([]byte(pair[0]), []byte(a.username))
-	passwordMatch := subtle.ConstantTimeCompare([]byte(pair[1]), []byte(a.password))
+	usernameHash := sha256.Sum256([]byte(pair[0]))
+	passwordHash := sha256.Sum256([]byte(pair[1]))
+	usernameMatch := subtle.ConstantTimeCompare(usernameHash[:], a.usernameHash[:])
+	passwordMatch := subtle.ConstantTimeCompare(passwordHash[:], a.passwordHash[:])
 	if usernameMatch&passwordMatch != 1 {
 		slog.Warn("Invalid credentials", "user", pair[0], "remote", r.RemoteAddr)
 		writeRequired(w)
