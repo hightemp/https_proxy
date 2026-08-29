@@ -20,8 +20,8 @@ var bufferPool = sync.Pool{
 }
 
 type connectionPair struct {
-	client net.Conn
-	dest   net.Conn
+	client io.Closer
+	dest   io.Closer
 }
 
 // Registry tracks active tunnels so they can be closed during shutdown.
@@ -39,7 +39,7 @@ func NewRegistry() *Registry {
 
 // Track registers a tunnel and returns an idempotent release function. It
 // rejects new tunnels after CloseAll begins.
-func (r *Registry) Track(client, destination net.Conn) (release func(), ok bool) {
+func (r *Registry) Track(client, destination io.Closer) (release func(), ok bool) {
 	pair := &connectionPair{client: client, dest: destination}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -138,6 +138,59 @@ func Relay(clientWriter net.Conn, clientSource io.Reader, destination net.Conn, 
 		_ = destination.SetDeadline(deadline)
 	}
 	<-results
+}
+
+// RelayStream relays an HTTP/2 CONNECT stream and its destination until both
+// directions finish or the tunnel remains idle. The request body represents
+// client-to-destination DATA frames; writes to clientWriter become response
+// DATA frames.
+func RelayStream(
+	clientWriter io.Writer,
+	clientSource io.ReadCloser,
+	destination net.Conn,
+	idleTimeout time.Duration,
+	flush func() error,
+) {
+	idle := newIdleController(idleTimeout, func() {
+		slog.Debug("Tunnel idle timeout reached", "idle_timeout", idleTimeout)
+		_ = clientSource.Close()
+		_ = destination.Close()
+	})
+	defer idle.stop()
+
+	results := make(chan error, 2)
+	go copyAndHalfClose(
+		destination,
+		activityReader{Reader: clientSource, touch: idle.touch},
+		results,
+	)
+	go copyAndHalfClose(
+		flushingWriter{Writer: clientWriter, flush: flush},
+		activityReader{Reader: destination, touch: idle.touch},
+		results,
+	)
+
+	if firstErr := <-results; firstErr != nil {
+		_ = clientSource.Close()
+		_ = destination.Close()
+	}
+	<-results
+}
+
+type flushingWriter struct {
+	io.Writer
+	flush func() error
+}
+
+func (w flushingWriter) Write(buffer []byte) (int, error) {
+	written, err := w.Writer.Write(buffer)
+	if err != nil || written == 0 || w.flush == nil {
+		return written, err
+	}
+	if flushErr := w.flush(); flushErr != nil {
+		return written, flushErr
+	}
+	return written, nil
 }
 
 type activityReader struct {

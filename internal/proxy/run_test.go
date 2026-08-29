@@ -231,6 +231,11 @@ func TestMakeTLSListenerUsesCertificateReloader(t *testing.T) {
 	if server.TLSConfig == nil || server.TLSConfig.GetCertificate == nil {
 		t.Fatal("TLS certificate reload callback is not configured")
 	}
+	if len(server.TLSConfig.NextProtos) != 2 ||
+		server.TLSConfig.NextProtos[0] != "h2" ||
+		server.TLSConfig.NextProtos[1] != "http/1.1" {
+		t.Fatalf("TLS ALPN protocols = %v, want [h2 http/1.1]", server.TLSConfig.NextProtos)
+	}
 	if len(server.TLSConfig.Certificates) != 0 {
 		t.Fatal("static TLS certificate configured alongside reload callback")
 	}

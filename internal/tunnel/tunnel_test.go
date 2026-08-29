@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -191,6 +192,86 @@ func TestRelayActivityResetsIdleTimeout(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * idleTimeout):
 		t.Fatal("Relay() did not stop after activity ceased")
+	}
+}
+
+func TestRelayStreamCopiesBothDirectionsAndFlushes(t *testing.T) {
+	clientSource, clientPeer := net.Pipe()
+	destination, destinationPeer := net.Pipe()
+	t.Cleanup(func() {
+		_ = clientPeer.Close()
+		_ = destinationPeer.Close()
+	})
+
+	var clientOutput bytes.Buffer
+	var flushes atomic.Int32
+	done := make(chan struct{})
+	go func() {
+		RelayStream(
+			&clientOutput,
+			clientSource,
+			destination,
+			time.Second,
+			func() error {
+				flushes.Add(1)
+				return nil
+			},
+		)
+		close(done)
+	}()
+
+	if _, err := clientPeer.Write([]byte("client-to-destination")); err != nil {
+		t.Fatalf("write client stream: %v", err)
+	}
+	upstreamPayload := make([]byte, len("client-to-destination"))
+	if _, err := io.ReadFull(destinationPeer, upstreamPayload); err != nil {
+		t.Fatalf("read destination payload: %v", err)
+	}
+	if string(upstreamPayload) != "client-to-destination" {
+		t.Fatalf("destination payload = %q", upstreamPayload)
+	}
+
+	if _, err := destinationPeer.Write([]byte("destination-to-client")); err != nil {
+		t.Fatalf("write destination stream: %v", err)
+	}
+	if err := destinationPeer.Close(); err != nil {
+		t.Fatalf("close destination peer: %v", err)
+	}
+	if err := clientPeer.Close(); err != nil {
+		t.Fatalf("close client peer: %v", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RelayStream() did not finish after both streams closed")
+	}
+	if clientOutput.String() != "destination-to-client" {
+		t.Fatalf("client payload = %q", clientOutput.String())
+	}
+	if flushes.Load() == 0 {
+		t.Fatal("RelayStream() did not flush response data")
+	}
+}
+
+func TestRelayStreamClosesIdleStream(t *testing.T) {
+	clientSource, clientPeer := net.Pipe()
+	destination, destinationPeer := net.Pipe()
+	t.Cleanup(func() {
+		_ = clientPeer.Close()
+		_ = destinationPeer.Close()
+	})
+
+	done := make(chan struct{})
+	go func() {
+		RelayStream(io.Discard, clientSource, destination, 40*time.Millisecond, nil)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RelayStream() did not stop after idle timeout")
 	}
 }
 

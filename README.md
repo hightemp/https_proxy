@@ -15,6 +15,7 @@ A secure HTTP/HTTPS proxy server in Go with Basic authentication, TLS support, a
 ## Features
 
 - HTTP and HTTPS proxy modes
+- HTTP/2 CONNECT multiplexing in HTTPS mode with HTTP/1.1 fallback
 - Basic authentication
 - TLS with configurable certificates
 - Upstream proxy chaining (proxy chain support)
@@ -25,7 +26,7 @@ A secure HTTP/HTTPS proxy server in Go with Basic authentication, TLS support, a
 - Bounded dial, TLS handshake, and response-header timeouts
 - Configurable via YAML file
 - Systemd service support
-- Graceful shutdown of HTTP requests and hijacked CONNECT tunnels
+- Graceful shutdown of HTTP requests and HTTP/1.1 or HTTP/2 CONNECT tunnels
 
 ## Installation
 
@@ -121,6 +122,8 @@ The bundled [docker-compose.yml](docker-compose.yml) starts an HTTP proxy, an HT
 
 Certbot checks for renewals every 12 hours. On new TLS handshakes, the HTTPS proxy checks the mounted certificate files at most once per `PROXY_TLS_RELOAD_INTERVAL` (one minute by default). A valid replacement is loaded without restarting the container or interrupting existing connections. If Certbot is temporarily updating the certificate/key pair or the new files are invalid, the proxy keeps the last valid certificate and retries later.
 
+HTTPS mode advertises HTTP/2 and HTTP/1.1 through ALPN. Browsers that support an HTTP/2 secure web proxy multiplex CONNECT tunnels as independent streams on one TLS connection; other clients continue to use the HTTP/1.1 CONNECT path.
+
 ### Build from source
 
 1. Clone the repository:
@@ -143,7 +146,7 @@ cmd/https_proxy/  application entry point
 internal/config/  configuration loading and validation
 internal/auth/    proxy authentication
 internal/proxy/   HTTP forwarding, upstream chaining, and server lifecycle
-internal/tunnel/  CONNECT tunnel tracking and bidirectional relay
+internal/tunnel/  HTTP/1.1 and HTTP/2 CONNECT tracking and bidirectional relay
 ```
 
 ## Configuration

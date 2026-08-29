@@ -261,10 +261,20 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		slog.Error("Hijacking not supported")
-		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+	var hijacker http.Hijacker
+	switch r.ProtoMajor {
+	case 1:
+		var ok bool
+		hijacker, ok = w.(http.Hijacker)
+		if !ok {
+			slog.Error("Hijacking not supported")
+			http.Error(w, "hijacking not supported", http.StatusInternalServerError)
+			return
+		}
+	case 2:
+		// HTTP/2 carries a CONNECT tunnel inside one bidirectional stream.
+	default:
+		http.Error(w, http.StatusText(http.StatusHTTPVersionNotSupported), http.StatusHTTPVersionNotSupported)
 		return
 	}
 
@@ -282,7 +292,14 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		writeUpstreamError(w, err)
 		return
 	}
+	if r.ProtoMajor == 2 {
+		p.relayHTTP2Tunnel(w, r, destination)
+		return
+	}
+	p.relayHTTP1Tunnel(hijacker, destination)
+}
 
+func (p *Server) relayHTTP1Tunnel(hijacker http.Hijacker, destination net.Conn) {
 	client, readWriter, err := hijacker.Hijack()
 	if err != nil {
 		slog.Error("Client connection hijack error", "error", err)
@@ -322,6 +339,40 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 
 	clientSource := tunnel.NewBufferedConn(client, readWriter.Reader)
 	tunnel.Relay(client, clientSource, destination, time.Duration(p.config.TunnelIdleTimeout))
+}
+
+func (p *Server) relayHTTP2Tunnel(w http.ResponseWriter, r *http.Request, destination net.Conn) {
+	release, tracked := p.tunnels.Track(r.Body, destination)
+	if !tracked {
+		_ = destination.Close()
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
+	defer release()
+	defer func() {
+		if closeErr := destination.Close(); closeErr != nil {
+			slog.Debug("Could not close destination connection", "error", closeErr)
+		}
+	}()
+	defer func() {
+		if closeErr := r.Body.Close(); closeErr != nil {
+			slog.Debug("Could not close HTTP/2 CONNECT request body", "error", closeErr)
+		}
+	}()
+
+	w.WriteHeader(http.StatusOK)
+	controller := http.NewResponseController(w)
+	if err := controller.Flush(); err != nil {
+		slog.Debug("Could not flush HTTP/2 CONNECT response", "error", err)
+		return
+	}
+	tunnel.RelayStream(
+		w,
+		r.Body,
+		destination,
+		time.Duration(p.config.TunnelIdleTimeout),
+		controller.Flush,
+	)
 }
 
 func (p *Server) approveDestination(ctx context.Context, address string) (approvedDestination, error) {

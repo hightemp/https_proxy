@@ -97,6 +97,7 @@ func makeListener(cfg config.Config, server *http.Server) (net.Listener, error) 
 		tlsConfig = &tls.Config{
 			GetCertificate: certificateReloader.getCertificate,
 			MinVersion:     tls.VersionTLS12,
+			NextProtos:     []string{"h2", "http/1.1"},
 		}
 		server.TLSConfig = tlsConfig
 	}
