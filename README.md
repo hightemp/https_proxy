@@ -7,7 +7,7 @@
 [![GitHub Downloads](https://img.shields.io/github/downloads/hightemp/https_proxy/total)](https://github.com/hightemp/https_proxy/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/hightemp/https_proxy.svg)](https://hub.docker.com/r/hightemp/https_proxy)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/hightemp/https_proxy/release.yml)](https://github.com/hightemp/https_proxy/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hightemp/https_proxy)](https://goreportcard.com/report/github.com/hightemp/https_proxy)
+[![Tests](https://github.com/hightemp/https_proxy/actions/workflows/test.yml/badge.svg)](https://github.com/hightemp/https_proxy/actions/workflows/test.yml)
 [![](https://asdertasd.site/counter/https_proxy?a=1)](https://asdertasd.site/counter/https_proxy)
 
 A secure HTTP/HTTPS proxy server in Go with Basic authentication, TLS support, and upstream proxy chaining.
