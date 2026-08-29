@@ -29,8 +29,13 @@ func (c *closeWriteTrackingConn) CloseWrite() error {
 
 func TestNewHTTPServerAppliesResourceLimits(t *testing.T) {
 	cfg := config.Default()
+	cfg.MaxTunnels = 400
+	cfg.MaxTunnelsPerIP = 180
 	cfg.ReadHeaderTimeout = config.Duration(7 * time.Second)
 	cfg.IdleTimeout = config.Duration(8 * time.Second)
+	cfg.HTTP2SendPingTimeout = config.Duration(9 * time.Second)
+	cfg.HTTP2PingTimeout = config.Duration(10 * time.Second)
+	cfg.HTTP2WriteByteTimeout = config.Duration(11 * time.Second)
 	cfg.MaxHeaderBytes = 32 << 10
 
 	server := newHTTPServer(cfg, http.NotFoundHandler())
@@ -43,6 +48,31 @@ func TestNewHTTPServerAppliesResourceLimits(t *testing.T) {
 	}
 	if server.MaxHeaderBytes != 32<<10 {
 		t.Fatalf("MaxHeaderBytes = %d, want %d", server.MaxHeaderBytes, 32<<10)
+	}
+	if server.HTTP2 == nil {
+		t.Fatal("HTTP2 config is nil")
+	}
+	if server.HTTP2.MaxConcurrentStreams != 180 {
+		t.Fatalf("HTTP/2 streams = %d, want automatic tunnel limit 180", server.HTTP2.MaxConcurrentStreams)
+	}
+	if server.HTTP2.SendPingTimeout != 9*time.Second ||
+		server.HTTP2.PingTimeout != 10*time.Second ||
+		server.HTTP2.WriteByteTimeout != 11*time.Second {
+		t.Fatalf(
+			"HTTP/2 timeouts = %s/%s/%s, want 9s/10s/11s",
+			server.HTTP2.SendPingTimeout,
+			server.HTTP2.PingTimeout,
+			server.HTTP2.WriteByteTimeout,
+		)
+	}
+}
+
+func TestEffectiveHTTP2MaxConcurrentStreamsUsesExplicitOverride(t *testing.T) {
+	cfg := config.Default()
+	cfg.HTTP2MaxConcurrentStreams = 64
+
+	if got := effectiveHTTP2MaxConcurrentStreams(cfg); got != 64 {
+		t.Fatalf("effectiveHTTP2MaxConcurrentStreams() = %d, want 64", got)
 	}
 }
 

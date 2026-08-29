@@ -10,6 +10,7 @@ max_connections: 1024
 max_connections_per_ip: 128
 max_tunnels: 256
 max_tunnels_per_ip: 128
+http2_max_concurrent_streams: 0
 max_idle_conns: 100
 max_idle_conns_per_host: 10
 max_header_bytes: 65536
@@ -24,6 +25,9 @@ idle_conn_timeout: 90s
 read_header_timeout: 15s
 idle_timeout: 2m
 tunnel_idle_timeout: 10m
+http2_send_ping_timeout: 1m
+http2_ping_timeout: 15s
+http2_write_byte_timeout: 30s
 auth_failure_window: 1m
 auth_block_duration: 5m
 shutdown_timeout: 15s

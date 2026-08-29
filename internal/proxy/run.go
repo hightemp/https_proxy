@@ -41,7 +41,21 @@ func Run(ctx context.Context, cfg config.Config) error {
 		slog.Info("Upstream proxy configured", "upstream", upstream.Redacted())
 	}
 
-	slog.Info("Starting proxy server", "addr", cfg.ProxyAddr, "proto", cfg.Proto)
+	startupAttributes := []any{"addr", cfg.ProxyAddr, "proto", cfg.Proto}
+	if cfg.Proto == "https" {
+		startupAttributes = append(
+			startupAttributes,
+			"http2_max_concurrent_streams",
+			effectiveHTTP2MaxConcurrentStreams(cfg),
+			"http2_send_ping_timeout",
+			time.Duration(cfg.HTTP2SendPingTimeout),
+			"http2_ping_timeout",
+			time.Duration(cfg.HTTP2PingTimeout),
+			"http2_write_byte_timeout",
+			time.Duration(cfg.HTTP2WriteByteTimeout),
+		)
+	}
+	slog.Info("Starting proxy server", startupAttributes...)
 	serveResult := make(chan error, 1)
 	go func() {
 		serveResult <- server.Serve(listener)
@@ -75,12 +89,25 @@ func Run(ctx context.Context, cfg config.Config) error {
 
 func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
 	return &http.Server{
-		Addr:              cfg.ProxyAddr,
+		Addr: cfg.ProxyAddr,
+		HTTP2: &http.HTTP2Config{
+			MaxConcurrentStreams: effectiveHTTP2MaxConcurrentStreams(cfg),
+			PingTimeout:          time.Duration(cfg.HTTP2PingTimeout),
+			SendPingTimeout:      time.Duration(cfg.HTTP2SendPingTimeout),
+			WriteByteTimeout:     time.Duration(cfg.HTTP2WriteByteTimeout),
+		},
 		ReadHeaderTimeout: time.Duration(cfg.ReadHeaderTimeout),
 		IdleTimeout:       time.Duration(cfg.IdleTimeout),
 		MaxHeaderBytes:    cfg.MaxHeaderBytes,
 		Handler:           handler,
 	}
+}
+
+func effectiveHTTP2MaxConcurrentStreams(cfg config.Config) int {
+	if cfg.HTTP2MaxConcurrentStreams > 0 {
+		return cfg.HTTP2MaxConcurrentStreams
+	}
+	return min(cfg.MaxTunnels, cfg.MaxTunnelsPerIP)
 }
 
 func makeListener(cfg config.Config, server *http.Server) (net.Listener, error) {

@@ -79,6 +79,7 @@ Any of these override the corresponding YAML field:
 | `PROXY_MAX_CONNECTIONS_PER_IP` | `max_connections_per_ip` |
 | `PROXY_MAX_TUNNELS` | `max_tunnels` |
 | `PROXY_MAX_TUNNELS_PER_IP` | `max_tunnels_per_ip` |
+| `PROXY_HTTP2_MAX_CONCURRENT_STREAMS` | `http2_max_concurrent_streams` (`0` derives the limit from tunnel limits) |
 | `PROXY_MAX_IDLE_CONNS` | `max_idle_conns` |
 | `PROXY_MAX_IDLE_CONNS_PER_HOST` | `max_idle_conns_per_host` |
 | `PROXY_MAX_HEADER_BYTES` | `max_header_bytes` |
@@ -93,6 +94,9 @@ Any of these override the corresponding YAML field:
 | `PROXY_READ_HEADER_TIMEOUT` | `read_header_timeout` |
 | `PROXY_IDLE_TIMEOUT` | `idle_timeout` |
 | `PROXY_TUNNEL_IDLE_TIMEOUT` | `tunnel_idle_timeout` |
+| `PROXY_HTTP2_SEND_PING_TIMEOUT` | `http2_send_ping_timeout` |
+| `PROXY_HTTP2_PING_TIMEOUT` | `http2_ping_timeout` |
+| `PROXY_HTTP2_WRITE_BYTE_TIMEOUT` | `http2_write_byte_timeout` |
 | `PROXY_AUTH_FAILURE_WINDOW` | `auth_failure_window` |
 | `PROXY_AUTH_BLOCK_DURATION` | `auth_block_duration` |
 | `PROXY_SHUTDOWN_TIMEOUT` | `shutdown_timeout` |
@@ -166,6 +170,7 @@ max_connections: 1024
 max_connections_per_ip: 128
 max_tunnels: 256
 max_tunnels_per_ip: 128
+http2_max_concurrent_streams: 0
 max_idle_conns: 100
 max_idle_conns_per_host: 10
 max_header_bytes: 65536
@@ -180,6 +185,9 @@ idle_conn_timeout: 90s
 read_header_timeout: 15s
 idle_timeout: 2m
 tunnel_idle_timeout: 10m
+http2_send_ping_timeout: 1m
+http2_ping_timeout: 15s
+http2_write_byte_timeout: 30s
 auth_failure_window: 1m
 auth_block_duration: 5m
 shutdown_timeout: 15s
@@ -204,6 +212,7 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 | `max_connections_per_ip` | Maximum simultaneous client connections per source IP |
 | `max_tunnels` | Maximum simultaneous CONNECT tunnels |
 | `max_tunnels_per_ip` | Maximum simultaneous CONNECT tunnels per source IP |
+| `http2_max_concurrent_streams` | Maximum streams advertised per HTTP/2 connection; `0` uses the lower of `max_tunnels` and `max_tunnels_per_ip` |
 | `max_idle_conns` | Maximum idle outbound HTTP connections across all destinations |
 | `max_idle_conns_per_host` | Maximum idle outbound HTTP connections retained per destination |
 | `max_header_bytes` | Maximum size of incoming HTTP request headers |
@@ -218,6 +227,9 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 | `read_header_timeout` | Incoming request-header timeout |
 | `idle_timeout` | Incoming keep-alive idle timeout |
 | `tunnel_idle_timeout` | Close a CONNECT tunnel after no traffic in either direction |
+| `http2_send_ping_timeout` | Send an HTTP/2 PING after no frame is received for this duration; `0s` disables health checks |
+| `http2_ping_timeout` | Close an HTTP/2 connection when a PING response is not received; `0s` uses Go's default |
+| `http2_write_byte_timeout` | Close an HTTP/2 connection when no response bytes can be written for this duration; `0s` disables the timeout |
 | `auth_failure_window` | Window in which failed authentication attempts are counted |
 | `auth_block_duration` | How long an IP is blocked after exceeding `auth_max_failures` |
 | `shutdown_timeout` | Graceful shutdown deadline |
@@ -228,7 +240,7 @@ By default, request URL userinfo and query parameters are removed from logs, ups
 
 ### Resource limits and destination policy
 
-Connection and CONNECT limits are enforced globally and per source IP. Excess TCP connections are closed immediately; excess tunnels and rate-limited authentication attempts receive `429 Too Many Requests`. A tunnel is closed when no bytes flow in either direction for `tunnel_idle_timeout`.
+Connection and CONNECT limits are enforced globally and per source IP. Excess TCP connections are closed immediately; excess tunnels and rate-limited authentication attempts receive `429 Too Many Requests`. A tunnel is closed when no bytes flow in either direction for `tunnel_idle_timeout`. Unless explicitly overridden, the HTTP/2 SETTINGS stream limit is derived from the lower tunnel limit so clients do not open streams that the proxy would immediately reject.
 
 The default destination policy rejects loopback, private, link-local, metadata, carrier-grade NAT, and other reserved addresses. It also blocks common administration, mail, database, and cache ports. To intentionally proxy internal services, set `allow_private_destinations: true`. To clear only the blocked port list, use `blocked_destination_ports: []` in YAML or `PROXY_BLOCKED_DESTINATION_PORTS=none`.
 

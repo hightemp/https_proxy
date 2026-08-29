@@ -41,36 +41,40 @@ func (d Duration) String() string {
 
 // Config contains all runtime settings for the proxy server.
 type Config struct {
-	ProxyAddr                string   `yaml:"proxy_addr"`
-	Username                 string   `yaml:"username"`
-	Password                 string   `yaml:"password"`
-	Proto                    string   `yaml:"proto"`
-	CertPath                 string   `yaml:"cert_path"`
-	KeyPath                  string   `yaml:"key_path"`
-	UpstreamProxy            string   `yaml:"upstream_proxy"`
-	Network                  string   `yaml:"network"`
-	LogSensitiveData         bool     `yaml:"log_sensitive_data"`
-	MaxConnections           int      `yaml:"max_connections"`
-	MaxConnectionsPerIP      int      `yaml:"max_connections_per_ip"`
-	MaxTunnels               int      `yaml:"max_tunnels"`
-	MaxTunnelsPerIP          int      `yaml:"max_tunnels_per_ip"`
-	MaxIdleConns             int      `yaml:"max_idle_conns"`
-	MaxIdleConnsPerHost      int      `yaml:"max_idle_conns_per_host"`
-	MaxHeaderBytes           int      `yaml:"max_header_bytes"`
-	AuthMaxFailures          int      `yaml:"auth_max_failures"`
-	AllowPrivateDestinations bool     `yaml:"allow_private_destinations"`
-	BlockedDestinationPorts  []int    `yaml:"blocked_destination_ports"`
-	DialTimeout              Duration `yaml:"dial_timeout"`
-	TLSHandshakeTimeout      Duration `yaml:"tls_handshake_timeout"`
-	TLSReloadInterval        Duration `yaml:"tls_reload_interval"`
-	ResponseHeaderTimeout    Duration `yaml:"response_header_timeout"`
-	IdleConnTimeout          Duration `yaml:"idle_conn_timeout"`
-	ReadHeaderTimeout        Duration `yaml:"read_header_timeout"`
-	IdleTimeout              Duration `yaml:"idle_timeout"`
-	TunnelIdleTimeout        Duration `yaml:"tunnel_idle_timeout"`
-	AuthFailureWindow        Duration `yaml:"auth_failure_window"`
-	AuthBlockDuration        Duration `yaml:"auth_block_duration"`
-	ShutdownTimeout          Duration `yaml:"shutdown_timeout"`
+	ProxyAddr                 string   `yaml:"proxy_addr"`
+	Username                  string   `yaml:"username"`
+	Password                  string   `yaml:"password"`
+	Proto                     string   `yaml:"proto"`
+	CertPath                  string   `yaml:"cert_path"`
+	KeyPath                   string   `yaml:"key_path"`
+	UpstreamProxy             string   `yaml:"upstream_proxy"`
+	Network                   string   `yaml:"network"`
+	LogSensitiveData          bool     `yaml:"log_sensitive_data"`
+	MaxConnections            int      `yaml:"max_connections"`
+	MaxConnectionsPerIP       int      `yaml:"max_connections_per_ip"`
+	MaxTunnels                int      `yaml:"max_tunnels"`
+	MaxTunnelsPerIP           int      `yaml:"max_tunnels_per_ip"`
+	HTTP2MaxConcurrentStreams int      `yaml:"http2_max_concurrent_streams"`
+	MaxIdleConns              int      `yaml:"max_idle_conns"`
+	MaxIdleConnsPerHost       int      `yaml:"max_idle_conns_per_host"`
+	MaxHeaderBytes            int      `yaml:"max_header_bytes"`
+	AuthMaxFailures           int      `yaml:"auth_max_failures"`
+	AllowPrivateDestinations  bool     `yaml:"allow_private_destinations"`
+	BlockedDestinationPorts   []int    `yaml:"blocked_destination_ports"`
+	DialTimeout               Duration `yaml:"dial_timeout"`
+	TLSHandshakeTimeout       Duration `yaml:"tls_handshake_timeout"`
+	TLSReloadInterval         Duration `yaml:"tls_reload_interval"`
+	ResponseHeaderTimeout     Duration `yaml:"response_header_timeout"`
+	IdleConnTimeout           Duration `yaml:"idle_conn_timeout"`
+	ReadHeaderTimeout         Duration `yaml:"read_header_timeout"`
+	IdleTimeout               Duration `yaml:"idle_timeout"`
+	TunnelIdleTimeout         Duration `yaml:"tunnel_idle_timeout"`
+	HTTP2SendPingTimeout      Duration `yaml:"http2_send_ping_timeout"`
+	HTTP2PingTimeout          Duration `yaml:"http2_ping_timeout"`
+	HTTP2WriteByteTimeout     Duration `yaml:"http2_write_byte_timeout"`
+	AuthFailureWindow         Duration `yaml:"auth_failure_window"`
+	AuthBlockDuration         Duration `yaml:"auth_block_duration"`
+	ShutdownTimeout           Duration `yaml:"shutdown_timeout"`
 }
 
 // Default returns a configuration with safe local-listener defaults.
@@ -80,29 +84,33 @@ func Default() Config {
 
 func defaultConfig() Config {
 	return Config{
-		ProxyAddr:               "127.0.0.1:8080",
-		Proto:                   "http",
-		Network:                 "auto",
-		MaxConnections:          1024,
-		MaxConnectionsPerIP:     128,
-		MaxTunnels:              256,
-		MaxTunnelsPerIP:         128,
-		MaxIdleConns:            100,
-		MaxIdleConnsPerHost:     10,
-		MaxHeaderBytes:          64 << 10,
-		AuthMaxFailures:         10,
-		BlockedDestinationPorts: []int{21, 22, 23, 25, 110, 111, 135, 137, 138, 139, 445, 1433, 2049, 2375, 2376, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017},
-		DialTimeout:             Duration(10 * time.Second),
-		TLSHandshakeTimeout:     Duration(10 * time.Second),
-		TLSReloadInterval:       Duration(time.Minute),
-		ResponseHeaderTimeout:   Duration(30 * time.Second),
-		IdleConnTimeout:         Duration(90 * time.Second),
-		ReadHeaderTimeout:       Duration(15 * time.Second),
-		IdleTimeout:             Duration(2 * time.Minute),
-		TunnelIdleTimeout:       Duration(10 * time.Minute),
-		AuthFailureWindow:       Duration(time.Minute),
-		AuthBlockDuration:       Duration(5 * time.Minute),
-		ShutdownTimeout:         Duration(15 * time.Second),
+		ProxyAddr:                 "127.0.0.1:8080",
+		Proto:                     "http",
+		Network:                   "auto",
+		MaxConnections:            1024,
+		MaxConnectionsPerIP:       128,
+		MaxTunnels:                256,
+		MaxTunnelsPerIP:           128,
+		HTTP2MaxConcurrentStreams: 0,
+		MaxIdleConns:              100,
+		MaxIdleConnsPerHost:       10,
+		MaxHeaderBytes:            64 << 10,
+		AuthMaxFailures:           10,
+		BlockedDestinationPorts:   []int{21, 22, 23, 25, 110, 111, 135, 137, 138, 139, 445, 1433, 2049, 2375, 2376, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017},
+		DialTimeout:               Duration(10 * time.Second),
+		TLSHandshakeTimeout:       Duration(10 * time.Second),
+		TLSReloadInterval:         Duration(time.Minute),
+		ResponseHeaderTimeout:     Duration(30 * time.Second),
+		IdleConnTimeout:           Duration(90 * time.Second),
+		ReadHeaderTimeout:         Duration(15 * time.Second),
+		IdleTimeout:               Duration(2 * time.Minute),
+		TunnelIdleTimeout:         Duration(10 * time.Minute),
+		HTTP2SendPingTimeout:      Duration(time.Minute),
+		HTTP2PingTimeout:          Duration(15 * time.Second),
+		HTTP2WriteByteTimeout:     Duration(30 * time.Second),
+		AuthFailureWindow:         Duration(time.Minute),
+		AuthBlockDuration:         Duration(5 * time.Minute),
+		ShutdownTimeout:           Duration(15 * time.Second),
 	}
 }
 
@@ -155,7 +163,8 @@ func decodeConfig(r io.Reader) (Config, error) {
 //	PROXY_CERT_PATH, PROXY_KEY_PATH, PROXY_UPSTREAM_PROXY, PROXY_NETWORK,
 //	PROXY_LOG_SENSITIVE_DATA, PROXY_MAX_CONNECTIONS,
 //	PROXY_MAX_CONNECTIONS_PER_IP, PROXY_MAX_TUNNELS,
-//	PROXY_MAX_TUNNELS_PER_IP, PROXY_MAX_IDLE_CONNS,
+//	PROXY_MAX_TUNNELS_PER_IP, PROXY_HTTP2_MAX_CONCURRENT_STREAMS,
+//	PROXY_MAX_IDLE_CONNS,
 //	PROXY_MAX_IDLE_CONNS_PER_HOST, PROXY_MAX_HEADER_BYTES,
 //	PROXY_AUTH_MAX_FAILURES, PROXY_ALLOW_PRIVATE_DESTINATIONS,
 //	PROXY_BLOCKED_DESTINATION_PORTS,
@@ -164,6 +173,8 @@ func decodeConfig(r io.Reader) (Config, error) {
 //	PROXY_RESPONSE_HEADER_TIMEOUT, PROXY_IDLE_CONN_TIMEOUT,
 //	PROXY_READ_HEADER_TIMEOUT,
 //	PROXY_IDLE_TIMEOUT, PROXY_TUNNEL_IDLE_TIMEOUT,
+//	PROXY_HTTP2_SEND_PING_TIMEOUT, PROXY_HTTP2_PING_TIMEOUT,
+//	PROXY_HTTP2_WRITE_BYTE_TIMEOUT,
 //	PROXY_AUTH_FAILURE_WINDOW, PROXY_AUTH_BLOCK_DURATION,
 //	PROXY_SHUTDOWN_TIMEOUT.
 func applyEnvOverrides(c *Config) error {
@@ -218,6 +229,7 @@ func applyEnvOverrides(c *Config) error {
 		{"PROXY_MAX_CONNECTIONS_PER_IP", &c.MaxConnectionsPerIP},
 		{"PROXY_MAX_TUNNELS", &c.MaxTunnels},
 		{"PROXY_MAX_TUNNELS_PER_IP", &c.MaxTunnelsPerIP},
+		{"PROXY_HTTP2_MAX_CONCURRENT_STREAMS", &c.HTTP2MaxConcurrentStreams},
 		{"PROXY_MAX_IDLE_CONNS", &c.MaxIdleConns},
 		{"PROXY_MAX_IDLE_CONNS_PER_HOST", &c.MaxIdleConnsPerHost},
 		{"PROXY_MAX_HEADER_BYTES", &c.MaxHeaderBytes},
@@ -255,6 +267,9 @@ func applyEnvOverrides(c *Config) error {
 		{"PROXY_READ_HEADER_TIMEOUT", &c.ReadHeaderTimeout},
 		{"PROXY_IDLE_TIMEOUT", &c.IdleTimeout},
 		{"PROXY_TUNNEL_IDLE_TIMEOUT", &c.TunnelIdleTimeout},
+		{"PROXY_HTTP2_SEND_PING_TIMEOUT", &c.HTTP2SendPingTimeout},
+		{"PROXY_HTTP2_PING_TIMEOUT", &c.HTTP2PingTimeout},
+		{"PROXY_HTTP2_WRITE_BYTE_TIMEOUT", &c.HTTP2WriteByteTimeout},
 		{"PROXY_AUTH_FAILURE_WINDOW", &c.AuthFailureWindow},
 		{"PROXY_AUTH_BLOCK_DURATION", &c.AuthBlockDuration},
 		{"PROXY_SHUTDOWN_TIMEOUT", &c.ShutdownTimeout},
@@ -336,6 +351,26 @@ func validateConfig(config *Config) error {
 	}
 	if config.MaxTunnelsPerIP > config.MaxTunnels {
 		return errors.New("max_tunnels_per_ip cannot exceed max_tunnels")
+	}
+	if config.HTTP2MaxConcurrentStreams < 0 {
+		return errors.New("http2_max_concurrent_streams must be zero or greater")
+	}
+	if config.HTTP2MaxConcurrentStreams > 0 &&
+		(config.HTTP2MaxConcurrentStreams > config.MaxTunnels ||
+			config.HTTP2MaxConcurrentStreams > config.MaxTunnelsPerIP) {
+		return errors.New("http2_max_concurrent_streams cannot exceed tunnel limits")
+	}
+	for _, duration := range []struct {
+		name  string
+		value Duration
+	}{
+		{"http2_send_ping_timeout", config.HTTP2SendPingTimeout},
+		{"http2_ping_timeout", config.HTTP2PingTimeout},
+		{"http2_write_byte_timeout", config.HTTP2WriteByteTimeout},
+	} {
+		if duration.value < 0 {
+			return fmt.Errorf("%s must be zero or greater", duration.name)
+		}
 	}
 	seenPorts := make(map[int]struct{}, len(config.BlockedDestinationPorts))
 	for _, port := range config.BlockedDestinationPorts {

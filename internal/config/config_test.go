@@ -40,6 +40,18 @@ func TestDecodeConfig(t *testing.T) {
 						time.Duration(got.IdleConnTimeout),
 					)
 				}
+				if got.HTTP2MaxConcurrentStreams != 0 ||
+					time.Duration(got.HTTP2SendPingTimeout) != time.Minute ||
+					time.Duration(got.HTTP2PingTimeout) != 15*time.Second ||
+					time.Duration(got.HTTP2WriteByteTimeout) != 30*time.Second {
+					t.Errorf(
+						"HTTP/2 defaults = streams %d, timeouts %s/%s/%s; want 0, 1m/15s/30s",
+						got.HTTP2MaxConcurrentStreams,
+						time.Duration(got.HTTP2SendPingTimeout),
+						time.Duration(got.HTTP2PingTimeout),
+						time.Duration(got.HTTP2WriteByteTimeout),
+					)
+				}
 			},
 		},
 		{
@@ -52,6 +64,7 @@ func TestDecodeConfig(t *testing.T) {
 				"max_connections_per_ip: 20",
 				"max_tunnels: 50",
 				"max_tunnels_per_ip: 5",
+				"http2_max_concurrent_streams: 4",
 				"max_idle_conns: 80",
 				"max_idle_conns_per_host: 8",
 				"max_header_bytes: 32768",
@@ -66,6 +79,9 @@ func TestDecodeConfig(t *testing.T) {
 				"read_header_timeout: 5s",
 				"idle_timeout: 6m",
 				"tunnel_idle_timeout: 8m",
+				"http2_send_ping_timeout: 11s",
+				"http2_ping_timeout: 12s",
+				"http2_write_byte_timeout: 13s",
 				"auth_failure_window: 9m",
 				"auth_block_duration: 10m",
 				"shutdown_timeout: 7s",
@@ -85,24 +101,26 @@ func TestDecodeConfig(t *testing.T) {
 					t.Error("AllowPrivateDestinations = false, want true")
 				}
 				wantLimits := map[string]int{
-					"MaxConnections":      200,
-					"MaxConnectionsPerIP": 20,
-					"MaxTunnels":          50,
-					"MaxTunnelsPerIP":     5,
-					"MaxIdleConns":        80,
-					"MaxIdleConnsPerHost": 8,
-					"MaxHeaderBytes":      32768,
-					"AuthMaxFailures":     7,
+					"MaxConnections":            200,
+					"MaxConnectionsPerIP":       20,
+					"MaxTunnels":                50,
+					"MaxTunnelsPerIP":           5,
+					"HTTP2MaxConcurrentStreams": 4,
+					"MaxIdleConns":              80,
+					"MaxIdleConnsPerHost":       8,
+					"MaxHeaderBytes":            32768,
+					"AuthMaxFailures":           7,
 				}
 				gotLimits := map[string]int{
-					"MaxConnections":      got.MaxConnections,
-					"MaxConnectionsPerIP": got.MaxConnectionsPerIP,
-					"MaxTunnels":          got.MaxTunnels,
-					"MaxTunnelsPerIP":     got.MaxTunnelsPerIP,
-					"MaxIdleConns":        got.MaxIdleConns,
-					"MaxIdleConnsPerHost": got.MaxIdleConnsPerHost,
-					"MaxHeaderBytes":      got.MaxHeaderBytes,
-					"AuthMaxFailures":     got.AuthMaxFailures,
+					"MaxConnections":            got.MaxConnections,
+					"MaxConnectionsPerIP":       got.MaxConnectionsPerIP,
+					"MaxTunnels":                got.MaxTunnels,
+					"MaxTunnelsPerIP":           got.MaxTunnelsPerIP,
+					"HTTP2MaxConcurrentStreams": got.HTTP2MaxConcurrentStreams,
+					"MaxIdleConns":              got.MaxIdleConns,
+					"MaxIdleConnsPerHost":       got.MaxIdleConnsPerHost,
+					"MaxHeaderBytes":            got.MaxHeaderBytes,
+					"AuthMaxFailures":           got.AuthMaxFailures,
 				}
 				for name, want := range wantLimits {
 					if value := gotLimits[name]; value != want {
@@ -122,6 +140,9 @@ func TestDecodeConfig(t *testing.T) {
 					"ReadHeaderTimeout":     5 * time.Second,
 					"IdleTimeout":           6 * time.Minute,
 					"TunnelIdleTimeout":     8 * time.Minute,
+					"HTTP2SendPingTimeout":  11 * time.Second,
+					"HTTP2PingTimeout":      12 * time.Second,
+					"HTTP2WriteByteTimeout": 13 * time.Second,
 					"AuthFailureWindow":     9 * time.Minute,
 					"AuthBlockDuration":     10 * time.Minute,
 					"ShutdownTimeout":       7 * time.Second,
@@ -135,6 +156,9 @@ func TestDecodeConfig(t *testing.T) {
 					"ReadHeaderTimeout":     time.Duration(got.ReadHeaderTimeout),
 					"IdleTimeout":           time.Duration(got.IdleTimeout),
 					"TunnelIdleTimeout":     time.Duration(got.TunnelIdleTimeout),
+					"HTTP2SendPingTimeout":  time.Duration(got.HTTP2SendPingTimeout),
+					"HTTP2PingTimeout":      time.Duration(got.HTTP2PingTimeout),
+					"HTTP2WriteByteTimeout": time.Duration(got.HTTP2WriteByteTimeout),
 					"AuthFailureWindow":     time.Duration(got.AuthFailureWindow),
 					"AuthBlockDuration":     time.Duration(got.AuthBlockDuration),
 					"ShutdownTimeout":       time.Duration(got.ShutdownTimeout),
@@ -460,6 +484,41 @@ func TestValidateConfig(t *testing.T) {
 			wantMessage: "max_tunnels_per_ip cannot exceed max_tunnels",
 		},
 		{
+			name: "negative HTTP/2 stream limit",
+			mutate: func(config *Config) {
+				config.HTTP2MaxConcurrentStreams = -1
+			},
+			wantMessage: "http2_max_concurrent_streams must be zero or greater",
+		},
+		{
+			name: "HTTP/2 streams exceed tunnel limits",
+			mutate: func(config *Config) {
+				config.HTTP2MaxConcurrentStreams = config.MaxTunnelsPerIP + 1
+			},
+			wantMessage: "http2_max_concurrent_streams cannot exceed tunnel limits",
+		},
+		{
+			name: "negative HTTP/2 ping interval",
+			mutate: func(config *Config) {
+				config.HTTP2SendPingTimeout = Duration(-time.Second)
+			},
+			wantMessage: "http2_send_ping_timeout must be zero or greater",
+		},
+		{
+			name: "negative HTTP/2 ping timeout",
+			mutate: func(config *Config) {
+				config.HTTP2PingTimeout = Duration(-time.Second)
+			},
+			wantMessage: "http2_ping_timeout must be zero or greater",
+		},
+		{
+			name: "negative HTTP/2 write timeout",
+			mutate: func(config *Config) {
+				config.HTTP2WriteByteTimeout = Duration(-time.Second)
+			},
+			wantMessage: "http2_write_byte_timeout must be zero or greater",
+		},
+		{
 			name: "nonpositive maximum idle connections",
 			mutate: func(config *Config) {
 				config.MaxIdleConns = 0
@@ -625,16 +684,17 @@ func TestApplyEnvOverridesParsesLogSensitiveData(t *testing.T) {
 func TestApplyEnvOverridesParsesResourceLimits(t *testing.T) {
 	clearProxyEnvironment(t)
 	for name, value := range map[string]string{
-		"PROXY_MAX_CONNECTIONS":            "200",
-		"PROXY_MAX_CONNECTIONS_PER_IP":     "20",
-		"PROXY_MAX_TUNNELS":                "50",
-		"PROXY_MAX_TUNNELS_PER_IP":         "5",
-		"PROXY_MAX_IDLE_CONNS":             "80",
-		"PROXY_MAX_IDLE_CONNS_PER_HOST":    "8",
-		"PROXY_MAX_HEADER_BYTES":           "32768",
-		"PROXY_AUTH_MAX_FAILURES":          "7",
-		"PROXY_ALLOW_PRIVATE_DESTINATIONS": "true",
-		"PROXY_BLOCKED_DESTINATION_PORTS":  "22, 25",
+		"PROXY_MAX_CONNECTIONS":              "200",
+		"PROXY_MAX_CONNECTIONS_PER_IP":       "20",
+		"PROXY_MAX_TUNNELS":                  "50",
+		"PROXY_MAX_TUNNELS_PER_IP":           "5",
+		"PROXY_HTTP2_MAX_CONCURRENT_STREAMS": "4",
+		"PROXY_MAX_IDLE_CONNS":               "80",
+		"PROXY_MAX_IDLE_CONNS_PER_HOST":      "8",
+		"PROXY_MAX_HEADER_BYTES":             "32768",
+		"PROXY_AUTH_MAX_FAILURES":            "7",
+		"PROXY_ALLOW_PRIVATE_DESTINATIONS":   "true",
+		"PROXY_BLOCKED_DESTINATION_PORTS":    "22, 25",
 	} {
 		t.Setenv(name, value)
 	}
@@ -648,6 +708,9 @@ func TestApplyEnvOverridesParsesResourceLimits(t *testing.T) {
 	}
 	if config.MaxTunnels != 50 || config.MaxTunnelsPerIP != 5 {
 		t.Fatalf("tunnel limits = %d/%d, want 50/5", config.MaxTunnels, config.MaxTunnelsPerIP)
+	}
+	if config.HTTP2MaxConcurrentStreams != 4 {
+		t.Fatalf("HTTP2MaxConcurrentStreams = %d, want 4", config.HTTP2MaxConcurrentStreams)
 	}
 	if config.MaxIdleConns != 80 || config.MaxIdleConnsPerHost != 8 {
 		t.Fatalf("HTTP idle connection limits = %d/%d, want 80/8", config.MaxIdleConns, config.MaxIdleConnsPerHost)
@@ -739,6 +802,9 @@ func TestApplyEnvOverridesParsesDurations(t *testing.T) {
 		{name: "read header", envName: "PROXY_READ_HEADER_TIMEOUT", value: "13s", get: func(c Config) time.Duration { return time.Duration(c.ReadHeaderTimeout) }, want: 13 * time.Second},
 		{name: "idle", envName: "PROXY_IDLE_TIMEOUT", value: "3m", get: func(c Config) time.Duration { return time.Duration(c.IdleTimeout) }, want: 3 * time.Minute},
 		{name: "tunnel idle", envName: "PROXY_TUNNEL_IDLE_TIMEOUT", value: "4m", get: func(c Config) time.Duration { return time.Duration(c.TunnelIdleTimeout) }, want: 4 * time.Minute},
+		{name: "HTTP/2 send ping", envName: "PROXY_HTTP2_SEND_PING_TIMEOUT", value: "45s", get: func(c Config) time.Duration { return time.Duration(c.HTTP2SendPingTimeout) }, want: 45 * time.Second},
+		{name: "HTTP/2 ping", envName: "PROXY_HTTP2_PING_TIMEOUT", value: "9s", get: func(c Config) time.Duration { return time.Duration(c.HTTP2PingTimeout) }, want: 9 * time.Second},
+		{name: "HTTP/2 write byte", envName: "PROXY_HTTP2_WRITE_BYTE_TIMEOUT", value: "20s", get: func(c Config) time.Duration { return time.Duration(c.HTTP2WriteByteTimeout) }, want: 20 * time.Second},
 		{name: "auth failure window", envName: "PROXY_AUTH_FAILURE_WINDOW", value: "5m", get: func(c Config) time.Duration { return time.Duration(c.AuthFailureWindow) }, want: 5 * time.Minute},
 		{name: "auth block", envName: "PROXY_AUTH_BLOCK_DURATION", value: "6m", get: func(c Config) time.Duration { return time.Duration(c.AuthBlockDuration) }, want: 6 * time.Minute},
 		{name: "shutdown", envName: "PROXY_SHUTDOWN_TIMEOUT", value: "14s", get: func(c Config) time.Duration { return time.Duration(c.ShutdownTimeout) }, want: 14 * time.Second},
@@ -773,6 +839,9 @@ func TestApplyEnvOverridesRejectsInvalidDurations(t *testing.T) {
 		{name: "read header", envName: "PROXY_READ_HEADER_TIMEOUT"},
 		{name: "idle", envName: "PROXY_IDLE_TIMEOUT"},
 		{name: "tunnel idle", envName: "PROXY_TUNNEL_IDLE_TIMEOUT"},
+		{name: "HTTP/2 send ping", envName: "PROXY_HTTP2_SEND_PING_TIMEOUT"},
+		{name: "HTTP/2 ping", envName: "PROXY_HTTP2_PING_TIMEOUT"},
+		{name: "HTTP/2 write byte", envName: "PROXY_HTTP2_WRITE_BYTE_TIMEOUT"},
 		{name: "auth failure window", envName: "PROXY_AUTH_FAILURE_WINDOW"},
 		{name: "auth block", envName: "PROXY_AUTH_BLOCK_DURATION"},
 		{name: "shutdown", envName: "PROXY_SHUTDOWN_TIMEOUT"},
@@ -811,6 +880,7 @@ func clearProxyEnvironment(t *testing.T) {
 		"PROXY_MAX_CONNECTIONS_PER_IP",
 		"PROXY_MAX_TUNNELS",
 		"PROXY_MAX_TUNNELS_PER_IP",
+		"PROXY_HTTP2_MAX_CONCURRENT_STREAMS",
 		"PROXY_MAX_IDLE_CONNS",
 		"PROXY_MAX_IDLE_CONNS_PER_HOST",
 		"PROXY_MAX_HEADER_BYTES",
@@ -825,6 +895,9 @@ func clearProxyEnvironment(t *testing.T) {
 		"PROXY_READ_HEADER_TIMEOUT",
 		"PROXY_IDLE_TIMEOUT",
 		"PROXY_TUNNEL_IDLE_TIMEOUT",
+		"PROXY_HTTP2_SEND_PING_TIMEOUT",
+		"PROXY_HTTP2_PING_TIMEOUT",
+		"PROXY_HTTP2_WRITE_BYTE_TIMEOUT",
 		"PROXY_AUTH_FAILURE_WINDOW",
 		"PROXY_AUTH_BLOCK_DURATION",
 		"PROXY_SHUTDOWN_TIMEOUT",
