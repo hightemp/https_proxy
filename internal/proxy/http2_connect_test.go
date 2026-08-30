@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -138,6 +139,70 @@ func TestAuthenticatedHTTP2ConnectTunnel(t *testing.T) {
 		}
 	case <-time.After(testIOTimeout):
 		t.Fatal("target exchange did not finish")
+	}
+}
+
+func TestHTTP2ForwardsPlainHTTPWithPrivacyMode(t *testing.T) {
+	originResult := make(chan error, 1)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/privacy" || r.URL.RawQuery != "check=yes" {
+			originResult <- fmt.Errorf("origin URL = %s", r.URL.String())
+			return
+		}
+		for _, name := range []string{"Forwarded", "Via", "X-Forwarded-For", "X-Real-IP"} {
+			if value := r.Header.Get(name); value != "" {
+				originResult <- fmt.Errorf("origin %s = %q", name, value)
+				return
+			}
+		}
+		if value := r.Header.Get("X-Keep"); value != "keep-value" {
+			originResult <- fmt.Errorf("origin X-Keep = %q", value)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		originResult <- nil
+	}))
+	t.Cleanup(origin.Close)
+	originURL, err := url.Parse(origin.URL)
+	if err != nil {
+		t.Fatalf("parse origin URL: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.AllowPrivateDestinations = true
+	cfg.BlockedDestinationPorts = nil
+	cfg.PrivacyMode = true
+	proxyHandler, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("NewServer() error = %v", err)
+	}
+
+	var proxyConnections atomic.Int32
+	proxyTLS := newHTTP2TestServer(proxyHandler, &proxyConnections)
+	t.Cleanup(proxyTLS.Close)
+	client := proxyTLS.Client()
+	client.Timeout = testIOTimeout
+
+	request, err := http.NewRequest(http.MethodGet, proxyTLS.URL+"/privacy?check=yes", nil)
+	if err != nil {
+		t.Fatalf("create HTTP/2 proxy request: %v", err)
+	}
+	request.Host = originURL.Host
+	request.Header.Set("Forwarded", "for=192.0.2.40")
+	request.Header.Set("Via", "1.1 client-proxy")
+	request.Header.Set("X-Forwarded-For", "192.0.2.41")
+	request.Header.Set("X-Real-IP", "192.0.2.42")
+	request.Header.Set("X-Keep", "keep-value")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("perform HTTP/2 proxy request: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.ProtoMajor != 2 || response.StatusCode != http.StatusNoContent {
+		t.Fatalf("proxy response = %s %d, want HTTP/2 204", response.Proto, response.StatusCode)
+	}
+	if err := <-originResult; err != nil {
+		t.Fatalf("origin: %v", err)
 	}
 }
 

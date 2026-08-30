@@ -174,7 +174,13 @@ func removeHopByHopHeaders(header http.Header) {
 }
 
 func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
-	destination, err := requestDestination(r.URL)
+	outboundURL, err := forwardedRequestURL(r)
+	if err != nil {
+		slog.Warn("Invalid HTTP destination", "url", p.requestURLForLog(r))
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	destination, err := requestDestination(outboundURL)
 	if err != nil {
 		slog.Warn("Invalid HTTP destination", "url", p.requestURLForLog(r))
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -187,6 +193,7 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	outRequest := r.Clone(r.Context())
+	outRequest.URL = outboundURL
 	outRequest.RequestURI = ""
 	outRequest.Host = outRequest.URL.Host
 	outRequest = outRequest.WithContext(context.WithValue(
@@ -199,10 +206,22 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	outRequest.Trailer = r.Trailer
 	acceptsTrailers := headerValuesContainToken(r.Header.Values("Te"), "trailers")
 	removeHopByHopHeaders(outRequest.Header)
+	if p.config.PrivacyMode {
+		removePrivacyHeaders(outRequest.Header)
+		removePrivacyHeaders(outRequest.Trailer)
+		if outRequest.Body != nil && outRequest.Body != http.NoBody {
+			outRequest.Body = &privacyTrailerBody{
+				ReadCloser: outRequest.Body,
+				trailer:    outRequest.Trailer,
+			}
+		}
+	}
 	if acceptsTrailers {
 		outRequest.Header.Set("Te", "trailers")
 	}
-	appendVia(outRequest.Header, r.ProtoMajor, r.ProtoMinor)
+	if !p.config.PrivacyMode {
+		appendVia(outRequest.Header, r.ProtoMajor, r.ProtoMinor)
+	}
 
 	response, err := p.httpClient.Do(outRequest)
 	if err != nil {
@@ -215,7 +234,12 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	removeHopByHopHeaders(response.Header)
-	appendVia(response.Header, response.ProtoMajor, response.ProtoMinor)
+	if p.config.PrivacyMode {
+		removePrivacyHeaders(response.Header)
+		removePrivacyHeaders(response.Trailer)
+	} else {
+		appendVia(response.Header, response.ProtoMajor, response.ProtoMinor)
+	}
 	copyHeaders(w.Header(), response.Header)
 	announcedTrailers := announceTrailers(w.Header(), response.Trailer)
 	w.WriteHeader(response.StatusCode)
@@ -231,6 +255,9 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if closeErr != nil {
 		slog.Debug("Could not close upstream response body", "error", closeErr)
 	}
+	if p.config.PrivacyMode {
+		removePrivacyHeaders(response.Trailer)
+	}
 
 	if len(response.Trailer) > 0 {
 		// Force chunked framing when an unannounced trailer appeared after a
@@ -239,6 +266,19 @@ func (p *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		copyTrailers(w.Header(), response.Trailer, announcedTrailers)
 	}
 	slog.Debug("Response copied", "bytes", written, "url", p.requestURLForLog(r))
+}
+
+func forwardedRequestURL(request *http.Request) (*url.URL, error) {
+	forwarded := *request.URL
+	if forwarded.Hostname() != "" {
+		return &forwarded, nil
+	}
+	if request.ProtoMajor != 2 || request.Host == "" {
+		return nil, errors.New("request destination host is empty")
+	}
+	forwarded.Scheme = "http"
+	forwarded.Host = request.Host
+	return &forwarded, nil
 }
 
 func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
@@ -281,7 +321,7 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	destination, err := p.dialApprovedUpstream(
 		r.Context(),
 		approved,
-		forwardedVia(r.Header, r.ProtoMajor, r.ProtoMinor),
+		p.viaForRequest(r.Header, r.ProtoMajor, r.ProtoMinor),
 	)
 	if err != nil {
 		if errors.Is(err, errDestinationDenied) {
@@ -297,6 +337,13 @@ func (p *Server) handleTunneling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.relayHTTP1Tunnel(hijacker, destination)
+}
+
+func (p *Server) viaForRequest(header http.Header, protoMajor, protoMinor int) string {
+	if p.config.PrivacyMode {
+		return ""
+	}
+	return forwardedVia(header, protoMajor, protoMinor)
 }
 
 func (p *Server) relayHTTP1Tunnel(hijacker http.Hijacker, destination net.Conn) {

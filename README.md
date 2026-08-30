@@ -16,6 +16,7 @@ A secure HTTP/HTTPS proxy server in Go with Basic authentication, TLS support, a
 
 - HTTP and HTTPS proxy modes
 - HTTP/2 CONNECT multiplexing in HTTPS mode with HTTP/1.1 fallback
+- Optional privacy mode for stripping client-IP and proxy-chain headers
 - Basic authentication
 - TLS with configurable certificates
 - Upstream proxy chaining (proxy chain support)
@@ -75,6 +76,7 @@ Any of these override the corresponding YAML field:
 | `PROXY_UPSTREAM_PROXY` | `upstream_proxy` (URL or `direct`) |
 | `PROXY_NETWORK` | `network` (`auto` / `tcp4` / `tcp6`) |
 | `PROXY_LOG_SENSITIVE_DATA` | `log_sensitive_data` (`true` exposes full request URLs, upstream errors, and rejected credentials in logs) |
+| `PROXY_PRIVACY_MODE` | `privacy_mode` (best-effort HTTP header privacy) |
 | `PROXY_MAX_CONNECTIONS` | `max_connections` |
 | `PROXY_MAX_CONNECTIONS_PER_IP` | `max_connections_per_ip` |
 | `PROXY_MAX_TUNNELS` | `max_tunnels` |
@@ -166,6 +168,7 @@ cert_path: ""
 key_path: ""
 network: auto
 log_sensitive_data: false
+privacy_mode: false
 max_connections: 1024
 max_connections_per_ip: 128
 max_tunnels: 256
@@ -208,6 +211,7 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 | `upstream_proxy` | Upstream proxy URL, `direct`, or empty to use proxy environment variables |
 | `network` | Outbound address family: `auto`, `tcp4`, or `tcp6` |
 | `log_sensitive_data` | Log full request URLs, upstream errors, and rejected Basic Auth username/password; disabled by default |
+| `privacy_mode` | Strip client-IP/forwarding headers and suppress `Via` for proxy-visible HTTP metadata |
 | `max_connections` | Maximum simultaneous client TCP connections |
 | `max_connections_per_ip` | Maximum simultaneous client connections per source IP |
 | `max_tunnels` | Maximum simultaneous CONNECT tunnels |
@@ -237,6 +241,12 @@ The example listens on localhost. Set `proxy_addr` to `0.0.0.0:8080` only when t
 Timeout values use Go duration syntax, for example `500ms`, `10s`, or `2m`. Unknown YAML keys and invalid values stop the proxy at startup instead of being silently ignored.
 
 By default, request URL userinfo and query parameters are removed from logs, upstream errors are reduced to their HTTP category, and rejected Basic Auth credentials are not logged. For temporary diagnostics, set `log_sensitive_data: true` or `PROXY_LOG_SENSITIVE_DATA=true`. This can expose passwords and tokens in plaintext logs; disable it immediately after debugging.
+
+### Privacy mode
+
+Set `privacy_mode: true` or `PROXY_PRIVACY_MODE=true` to remove known client-address forwarding metadata from ordinary HTTP requests and trailers, including RFC `Forwarded`, `Via`, `X-Forwarded-*`, `X-Real-IP`, `True-Client-IP`, CDN connecting-IP headers, and common vendor equivalents. The proxy also omits its own `Via` header and does not forward a `Via` chain to an upstream proxy.
+
+This is best-effort header privacy, not full anonymity. HTTPS/WSS traffic inside CONNECT is encrypted end-to-end, so the proxy cannot remove cookies, authorization headers, browser fingerprints, or application identifiers without acting as a TLS interception proxy. Browser traffic outside HTTP/HTTPS/WS/WSS, including WebRTC or other UDP paths, can bypass a web proxy. Sites can also classify the server's public IP as hosting, VPN, or proxy infrastructure.
 
 ### Resource limits and destination policy
 

@@ -41,7 +41,11 @@ func Run(ctx context.Context, cfg config.Config) error {
 		slog.Info("Upstream proxy configured", "upstream", upstream.Redacted())
 	}
 
-	startupAttributes := []any{"addr", cfg.ProxyAddr, "proto", cfg.Proto}
+	startupAttributes := []any{
+		"addr", cfg.ProxyAddr,
+		"proto", cfg.Proto,
+		"privacy_mode", cfg.PrivacyMode,
+	}
 	if cfg.Proto == "https" {
 		startupAttributes = append(
 			startupAttributes,

@@ -50,6 +50,7 @@ type Config struct {
 	UpstreamProxy             string   `yaml:"upstream_proxy"`
 	Network                   string   `yaml:"network"`
 	LogSensitiveData          bool     `yaml:"log_sensitive_data"`
+	PrivacyMode               bool     `yaml:"privacy_mode"`
 	MaxConnections            int      `yaml:"max_connections"`
 	MaxConnectionsPerIP       int      `yaml:"max_connections_per_ip"`
 	MaxTunnels                int      `yaml:"max_tunnels"`
@@ -87,6 +88,7 @@ func defaultConfig() Config {
 		ProxyAddr:                 "127.0.0.1:8080",
 		Proto:                     "http",
 		Network:                   "auto",
+		PrivacyMode:               false,
 		MaxConnections:            1024,
 		MaxConnectionsPerIP:       128,
 		MaxTunnels:                256,
@@ -161,7 +163,8 @@ func decodeConfig(r io.Reader) (Config, error) {
 //
 //	PROXY_ADDR, PROXY_USERNAME, PROXY_PASSWORD, PROXY_PROTO,
 //	PROXY_CERT_PATH, PROXY_KEY_PATH, PROXY_UPSTREAM_PROXY, PROXY_NETWORK,
-//	PROXY_LOG_SENSITIVE_DATA, PROXY_MAX_CONNECTIONS,
+//	PROXY_LOG_SENSITIVE_DATA, PROXY_PRIVACY_MODE,
+//	PROXY_MAX_CONNECTIONS,
 //	PROXY_MAX_CONNECTIONS_PER_IP, PROXY_MAX_TUNNELS,
 //	PROXY_MAX_TUNNELS_PER_IP, PROXY_HTTP2_MAX_CONCURRENT_STREAMS,
 //	PROXY_MAX_IDLE_CONNS,
@@ -207,6 +210,7 @@ func applyEnvOverrides(c *Config) error {
 		dest *bool
 	}{
 		{"PROXY_LOG_SENSITIVE_DATA", &c.LogSensitiveData},
+		{"PROXY_PRIVACY_MODE", &c.PrivacyMode},
 		{"PROXY_ALLOW_PRIVATE_DESTINATIONS", &c.AllowPrivateDestinations},
 	}
 	for _, override := range boolOverrides {

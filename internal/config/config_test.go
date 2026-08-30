@@ -60,6 +60,7 @@ func TestDecodeConfig(t *testing.T) {
 				"proxy_addr: 0.0.0.0:3128",
 				"network: tcp4",
 				"log_sensitive_data: true",
+				"privacy_mode: true",
 				"max_connections: 200",
 				"max_connections_per_ip: 20",
 				"max_tunnels: 50",
@@ -96,6 +97,9 @@ func TestDecodeConfig(t *testing.T) {
 				}
 				if !got.LogSensitiveData {
 					t.Error("LogSensitiveData = false, want true")
+				}
+				if !got.PrivacyMode {
+					t.Error("PrivacyMode = false, want true")
 				}
 				if !got.AllowPrivateDestinations {
 					t.Error("AllowPrivateDestinations = false, want true")
@@ -681,6 +685,42 @@ func TestApplyEnvOverridesParsesLogSensitiveData(t *testing.T) {
 	}
 }
 
+func TestApplyEnvOverridesParsesPrivacyMode(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     string
+		want      bool
+		wantError bool
+	}{
+		{name: "enabled", value: "true", want: true},
+		{name: "disabled", value: "false", want: false},
+		{name: "invalid", value: "sometimes", wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clearProxyEnvironment(t)
+			t.Setenv("PROXY_PRIVACY_MODE", test.value)
+			config := defaultConfig()
+			config.PrivacyMode = !test.want
+
+			err := applyEnvOverrides(&config)
+			if test.wantError {
+				if err == nil || !strings.Contains(err.Error(), "PROXY_PRIVACY_MODE") {
+					t.Fatalf("applyEnvOverrides() error = %v, want boolean parse error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("applyEnvOverrides() error = %v", err)
+			}
+			if config.PrivacyMode != test.want {
+				t.Fatalf("PrivacyMode = %t, want %t", config.PrivacyMode, test.want)
+			}
+		})
+	}
+}
+
 func TestApplyEnvOverridesParsesResourceLimits(t *testing.T) {
 	clearProxyEnvironment(t)
 	for name, value := range map[string]string{
@@ -876,6 +916,7 @@ func clearProxyEnvironment(t *testing.T) {
 		"PROXY_UPSTREAM_PROXY",
 		"PROXY_NETWORK",
 		"PROXY_LOG_SENSITIVE_DATA",
+		"PROXY_PRIVACY_MODE",
 		"PROXY_MAX_CONNECTIONS",
 		"PROXY_MAX_CONNECTIONS_PER_IP",
 		"PROXY_MAX_TUNNELS",

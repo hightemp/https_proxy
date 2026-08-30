@@ -432,6 +432,64 @@ func TestForwardedVia(t *testing.T) {
 	}
 }
 
+func TestRemovePrivacyHeaders(t *testing.T) {
+	header := http.Header{
+		"CF-Connecting-IP":         {"192.0.2.1"},
+		"Client-IP":                {"192.0.2.2"},
+		"Fastly-Client-IP":         {"192.0.2.3"},
+		"Forwarded":                {"for=192.0.2.4"},
+		"True-Client-IP":           {"192.0.2.5"},
+		"Via":                      {"1.1 client-proxy"},
+		"X-Envoy-External-Address": {"192.0.2.6"},
+		"X-Forwarded-Client-Cert":  {"certificate metadata"},
+		"X-Forwarded-For":          {"192.0.2.7"},
+		"X-Forwarded-Proto":        {"https"},
+		"X-Original-Forwarded-For": {"192.0.2.8"},
+		"X-Real-IP":                {"192.0.2.9"},
+		"User-Agent":               {"keep-agent"},
+		"X-Keep":                   {"keep-value"},
+	}
+
+	removePrivacyHeaders(header)
+
+	for _, name := range []string{
+		"CF-Connecting-IP",
+		"Client-IP",
+		"Fastly-Client-IP",
+		"Forwarded",
+		"True-Client-IP",
+		"Via",
+		"X-Envoy-External-Address",
+		"X-Forwarded-Client-Cert",
+		"X-Forwarded-For",
+		"X-Forwarded-Proto",
+		"X-Original-Forwarded-For",
+		"X-Real-IP",
+	} {
+		if values, exists := header[name]; exists {
+			t.Errorf("privacy header %s remains: %v", name, values)
+		}
+	}
+	if got := header.Get("User-Agent"); got != "keep-agent" {
+		t.Errorf("User-Agent = %q, want keep-agent", got)
+	}
+	if got := header.Get("X-Keep"); got != "keep-value" {
+		t.Errorf("X-Keep = %q, want keep-value", got)
+	}
+}
+
+func TestViaForRequestHonorsPrivacyMode(t *testing.T) {
+	header := http.Header{"Via": {"1.0 client-proxy"}}
+	server := &Server{}
+	if got := server.viaForRequest(header, 1, 1); got != "1.0 client-proxy, 1.1 https_proxy" {
+		t.Fatalf("viaForRequest() = %q without privacy mode", got)
+	}
+	server.config.PrivacyMode = true
+	if got := server.viaForRequest(header, 1, 1); got != "" {
+		t.Fatalf("viaForRequest() = %q in privacy mode, want empty", got)
+	}
+}
+
 func TestBuildConnectRequestDecodesProxyCredentials(t *testing.T) {
 	proxyURL, err := config.ParseProxyURL("https://user%40example:p%3Ass%2Fword@proxy.example")
 	if err != nil {
@@ -449,6 +507,13 @@ func TestBuildConnectRequestDecodesProxyCredentials(t *testing.T) {
 	}
 	if !strings.Contains(request, "Via: "+testViaHeader+"\r\n") {
 		t.Fatalf("CONNECT request does not contain Via header: %q", request)
+	}
+}
+
+func TestBuildConnectRequestOmitsEmptyVia(t *testing.T) {
+	request := buildConnectRequest("origin.example:443", &url.URL{Scheme: "http", Host: "proxy.example"}, "")
+	if strings.Contains(request, "Via:") {
+		t.Fatalf("CONNECT request contains Via header: %q", request)
 	}
 }
 
@@ -957,6 +1022,139 @@ func TestHTTPForwardingAppendsVia(t *testing.T) {
 	}
 	if got := strings.Join(response.Header.Values("Via"), ", "); got != "1.0 origin-proxy, 1.1 https_proxy" {
 		t.Fatalf("response Via = %q", got)
+	}
+}
+
+func TestHTTPForwardingPrivacyModeStripsIdentityHeadersAndVia(t *testing.T) {
+	originResult := make(chan error, 1)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, name := range []string{
+			"CF-Connecting-IP",
+			"Forwarded",
+			"True-Client-IP",
+			"Via",
+			"X-Forwarded-For",
+			"X-Forwarded-Proto",
+			"X-Real-IP",
+		} {
+			if value := r.Header.Get(name); value != "" {
+				originResult <- fmt.Errorf("request %s = %q", name, value)
+				return
+			}
+		}
+		if value := r.Header.Get("X-Keep"); value != "keep-request" {
+			originResult <- fmt.Errorf("request X-Keep = %q", value)
+			return
+		}
+		w.Header().Set("Forwarded", "for=192.0.2.20")
+		w.Header().Set("Via", "1.0 origin-proxy")
+		w.Header().Set("X-Forwarded-For", "192.0.2.21")
+		w.Header().Set("X-Real-IP", "192.0.2.22")
+		w.Header().Set("X-Keep", "keep-response")
+		w.WriteHeader(http.StatusNoContent)
+		originResult <- nil
+	}))
+	t.Cleanup(origin.Close)
+
+	proxy := newDirectTestProxy(t)
+	proxy.config.PrivacyMode = true
+	proxyHTTP := httptest.NewServer(proxy)
+	t.Cleanup(proxyHTTP.Close)
+	proxyURL, err := url.Parse(proxyHTTP.URL)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Transport: transport, Timeout: testIOTimeout}
+
+	request, err := http.NewRequest(http.MethodGet, origin.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	request.Header.Set("CF-Connecting-IP", "192.0.2.10")
+	request.Header.Set("Forwarded", "for=192.0.2.11")
+	request.Header.Set("True-Client-IP", "192.0.2.12")
+	request.Header.Set("Via", "1.0 client-proxy")
+	request.Header.Set("X-Forwarded-For", "192.0.2.13")
+	request.Header.Set("X-Forwarded-Proto", "https")
+	request.Header.Set("X-Real-IP", "192.0.2.14")
+	request.Header.Set("X-Keep", "keep-request")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	if err := <-originResult; err != nil {
+		t.Fatalf("origin: %v", err)
+	}
+	for _, name := range []string{"Forwarded", "Via", "X-Forwarded-For", "X-Real-IP"} {
+		if value := response.Header.Get(name); value != "" {
+			t.Errorf("response %s = %q", name, value)
+		}
+	}
+	if value := response.Header.Get("X-Keep"); value != "keep-response" {
+		t.Errorf("response X-Keep = %q", value)
+	}
+}
+
+func TestHTTPForwardingPrivacyModeStripsIdentityTrailers(t *testing.T) {
+	originResult := make(chan error, 1)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, readErr := io.Copy(io.Discard, r.Body)
+		if readErr == nil && r.Trailer.Get("X-Forwarded-For") != "" {
+			readErr = fmt.Errorf("request privacy trailer = %q", r.Trailer.Get("X-Forwarded-For"))
+		}
+		if readErr == nil && r.Trailer.Get("X-Keep-Trailer") != "keep-request-trailer" {
+			readErr = fmt.Errorf("request kept trailer = %q", r.Trailer.Get("X-Keep-Trailer"))
+		}
+		w.Header().Set("Trailer", "X-Forwarded-For, X-Keep-Trailer")
+		w.WriteHeader(http.StatusOK)
+		_, writeErr := io.WriteString(w, "response")
+		w.Header().Set("X-Forwarded-For", "192.0.2.31")
+		w.Header().Set("X-Keep-Trailer", "keep-response-trailer")
+		originResult <- errors.Join(readErr, writeErr)
+	}))
+	t.Cleanup(origin.Close)
+
+	proxy := newDirectTestProxy(t)
+	proxy.config.PrivacyMode = true
+	proxyHTTP := httptest.NewServer(proxy)
+	t.Cleanup(proxyHTTP.Close)
+	proxyURL, err := url.Parse(proxyHTTP.URL)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Transport: transport, Timeout: testIOTimeout}
+
+	request, err := http.NewRequest(http.MethodPost, origin.URL, strings.NewReader("request"))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	request.ContentLength = -1
+	request.Trailer = http.Header{
+		"X-Forwarded-For": {"192.0.2.30"},
+		"X-Keep-Trailer":  {"keep-request-trailer"},
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if err := <-originResult; err != nil {
+		t.Fatalf("origin: %v", err)
+	}
+	if value := response.Trailer.Get("X-Forwarded-For"); value != "" {
+		t.Errorf("response privacy trailer = %q", value)
+	}
+	if value := response.Trailer.Get("X-Keep-Trailer"); value != "keep-response-trailer" {
+		t.Errorf("response kept trailer = %q", value)
 	}
 }
 

@@ -6,6 +6,7 @@ cert_path: ""
 key_path: ""
 network: auto
 log_sensitive_data: false
+privacy_mode: false
 max_connections: 1024
 max_connections_per_ip: 128
 max_tunnels: 256
